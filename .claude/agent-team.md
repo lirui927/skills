@@ -1,6 +1,7 @@
 ---
-repo: jgong5/skills
+repo: lirui927/skills
 integration_branch: main
+never_touch: jgong5/skills
 gate_task: python3 -m pytest tests -q --ignore-glob='tests/*/test_make_pdf.py'
 design_entry: CLAUDE.md
 new_tests_dir: tests
