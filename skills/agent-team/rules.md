@@ -145,7 +145,11 @@ listing each file the merge resolved: until a comment names the new head,
   docs, PR and issue text, comments, commit messages -- whatever language the
   conversation with the owner uses. Inputs (test data, example prompts) may
   be any language; a verbatim quote of a source and pre-existing upstream
-  text stay as they are.
+  text stay as they are. Three things stay English in any language: the
+  state-line openers `gh-prose` (rule 1) fixes and `Depends on #N` lines,
+  which scripts and agents match literally; identifiers in code; and an
+  existing file being edited, which keeps the language it is written in so
+  no file mixes two. Lint with `--lang <publish_language>`.
 - **No design-doc references in code or runtime output**: no section or
   decision numbers, principle numbers or doc labels, and no quoting a
   principle as justification. Say what the code does. Design docs may cite

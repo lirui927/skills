@@ -5,6 +5,7 @@ never_touch: jgong5/skills
 gate_task: python3 -m pytest tests -q --ignore-glob='tests/*/test_make_pdf.py'
 design_entry: CLAUDE.md
 new_tests_dir: tests
+publish_language: Chinese
 prose_tests: tests/*/test_skill_md.py, tests/*/test_reference_docs.py, tests/asm_tutorial/test_cdna_facts.py
 ---
 `gate_task` leaves out `tests/*/test_make_pdf.py`: those tests need pandoc,

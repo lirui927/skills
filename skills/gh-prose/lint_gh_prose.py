@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Form checks for GitHub prose. Usage: lint_gh_prose.py --kind KIND FILE. Exit 1 on hits."""
+"""Form checks for GitHub prose. Usage: lint_gh_prose.py --kind KIND [--lang LANG] FILE. Exit 1 on hits."""
 
 import argparse
 import re
@@ -26,6 +26,17 @@ PATTERNS = {
     "em dash": "\u2014",
     "emoji": r"[\U0001F300-\U0001FAFF\u2600-\u27BF]",
 }
+CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+
+def count_words(text):
+    """Whitespace words, with two CJK characters counted as one.
+
+    CJK is written without spaces, so splitting alone counts a whole Chinese
+    sentence as one word and no budget is ever reached; a CJK character carries
+    about half an English word.
+    """
+    return len(CJK.sub(" ", text).split()) + len(CJK.findall(text)) // 2
 
 
 def visible(text):
@@ -34,11 +45,11 @@ def visible(text):
     return re.sub(r"^```.*?^```", "", text, flags=re.S | re.M)
 
 
-def lint(text, kind):
+def lint(text, kind, lang="English"):
     out = visible(text)
     lines = out.splitlines()
     hits = []
-    words = len(out.split())
+    words = count_words(out)
     if words > BUDGET[kind]:
         hits.append(f"{words} words outside <details>/code, budget {BUDGET[kind]}")
     bold = re.sub(r"`[^`]*`", "", out).count("**") // 2
@@ -53,6 +64,8 @@ def lint(text, kind):
     for n, line in enumerate(lines, 1):
         line = re.sub(r"\[[^\]]*\]\([^)]*\)", "", line)  # a linked ref is fine
         for name, pat in PATTERNS.items():
+            if name == "non-English text" and lang.lower() != "english":
+                continue  # the project publishes in that language
             if name == "round history in body" and kind in ("comment", "review"):
                 continue
             if name.startswith("line number") and kind == "inline":
@@ -70,8 +83,10 @@ def lint(text, kind):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", choices=BUDGET, required=True)
+    ap.add_argument("--lang", default="English",
+                    help="the language the text is published in; CJK is a hit only in English")
     ap.add_argument("file")
     a = ap.parse_args()
-    hits = lint(open(a.file, encoding="utf-8").read(), a.kind)
+    hits = lint(open(a.file, encoding="utf-8").read(), a.kind, a.lang)
     print("\n".join(hits) or "clean")
     sys.exit(1 if hits else 0)

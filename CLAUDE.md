@@ -224,13 +224,16 @@ recording fake; the merge-async endpoint itself has no offline test.
 
 ## Conventions
 
-- **Every tracked file is ASCII.** Use `--` for dashes, straight quotes. Tests
-  enforce this for `asm-tutorial`'s, `implementation-study`'s, and
-  `architecture-study`'s docs; the rest of the repo follows it too. Two
-  exceptions: `tests/gh_prose/samples/bad/`, real GitHub text kept verbatim
-  because its em dashes and CJK are what the lint must catch; and
-  `docs/claude-setup-guide.md`, this fork owner's setup guide, written in
-  Chinese for its reader.
+- **New text is Chinese; what exists stays as it is.** This fork publishes in
+  Chinese (the overlay's `publish_language`): issues, PRs, comments, review
+  records, commit messages, and new docs and code comments. Identifiers, the
+  state-line openers scripts match (`agent-team`'s `rules.md`, What gets
+  published), and every existing file being edited keep their English, so no
+  file mixes two languages and upstream changes still merge. English text is
+  ASCII: `--` for dashes, straight quotes. Tests pin ASCII for
+  `asm-tutorial`'s, `implementation-study`'s, and `architecture-study`'s docs.
+  `tests/gh_prose/samples/bad/` keeps real GitHub text verbatim because its
+  em dashes and CJK are what the default English lint must catch.
 - Prose in skills explains *why* a mechanism exists, not just what it does --
   the "Why this pipeline and not something simpler" sections are load-bearing,
   because a future editor who does not know why Chrome is driven over CDP

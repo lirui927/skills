@@ -22,6 +22,9 @@ guessing.
 1. **First line: state, then the ask.** `Closes #N. Ready for review. No blocking issues.` /
    `Needs owner ruling: <question>.` / `APPROVE @ <sha>.` /
    `REQUEST CHANGES @ <sha>: <n> blocking.` / `Round N pushed <sha>.`
+   These openers, `Claimed: branch task-<n>.` and `Depends on #N` stay
+   verbatim English whatever language the rest is in: scripts and agents
+   match them literally. Write the rest of the line in the publish language.
 2. **Each fact once.** Do not restate the title, the diff, the issue or another comment; link it.
 3. **Results, not process.** Commit and result, not how the tree was staged or verified.
 4. **Current state, not history.** Rewrite the PR body in place each round;
@@ -67,7 +70,9 @@ lint as `--kind inline`.
 ## Before posting
 
 ```
-python3 <skill-dir>/lint_gh_prose.py --kind issue|brief|pr|ruling|review|comment|inline body.md
+python3 <skill-dir>/lint_gh_prose.py --kind issue|brief|pr|ruling|review|comment|inline [--lang <language>] body.md
 ```
-Fix every hit, then `gh ... --body-file body.md`. The lint checks form only;
+`--lang` is the language the text is published in; under `agent-team` it is
+the overlay's `publish_language`. Without it the lint expects English and
+counts any CJK as a hit. Fix every hit, then `gh ... --body-file body.md`. The lint checks form only;
 rules 2, 3, 4 and 6 still need a reread as the owner.
