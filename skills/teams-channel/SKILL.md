@@ -62,22 +62,34 @@ the launch, so sign-in, chat creation and the server all read the same state.
    shows up as a self-chat in Teams. Open Teams on your phone and you will see
    it.
 
-4. **Print the launch command.** The channel is not in Claude Code's official
-   allowlist, so it loads only under the development-channels flag. Give the
-   person this command, with `TEAMS_STATE_DIR` set to the directory from step 1:
+4. **Print the launch commands.** The channel is not in Claude Code's official
+   allowlist, so it loads only under the development-channels flag, and every
+   start asks to confirm that flag. `<skill-dir>/launch.py` keeps such a
+   session in tmux and answers that prompt. Give the person these commands,
+   with the state directory from step 1 and the chat name as the agent:
 
    ```
-   TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@<marketplace>
+   TEAMS_STATE_DIR=<state dir> python3 <skill-dir>/launch.py install --agent <chat name> --workdir <project dir>
+   claude-teams start
    ```
 
-   `<marketplace>` is the marketplace this bundle was installed from -- `jgong5`
-   for this repo (`claude plugin list` shows each plugin as `<bundle>@<marketplace>`).
-   The flag is for local channel development only; it is what lets a channel
-   outside the allowlist attach at all.
+   `install` writes `~/.local/bin/claude-teams` with those options and the
+   state directory fixed in it; `claude-teams attach|status|stop` then watch,
+   check and end the session. The agent name picks the tmux session
+   (`claude-<agent>`). Arguments after `--` go to
+   `claude`. Run `launch.py` on the host, not in a container: it drives tmux and
+   `claude` there. After a plugin update, run `install` again, since the wrapper
+   names this version's file.
 
-Once a session is running under that command, send it a message from the Teams
-chat and it arrives in the session within a second; the session's replies and
-its permission prompts come back to the same chat.
+   Without tmux, the bare command is
+   `TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@jgong5`,
+   and the person confirms the warning and checks `/mcp` themselves. `jgong5` is
+   this repo's marketplace name. The flag is for local channel development only;
+   it is what lets a channel outside the allowlist attach at all.
+
+Once `claude-teams status` reports the server connected, send a message from the
+Teams chat and it arrives in the session within a second; the session's replies
+and its permission prompts come back to the same chat.
 
 ## What the session sees
 

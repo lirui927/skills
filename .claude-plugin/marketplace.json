@@ -93,7 +93,7 @@
     {
       "name": "teams-channel",
       "source": "./",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Talk to a Claude Code session from Microsoft Teams: an MCP channel server that relays one self-chat into the session, plus a setup skill that signs in, creates the chat, and prints the launch command.",
       "category": "productivity",
       "keywords": [

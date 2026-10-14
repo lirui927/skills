@@ -461,16 +461,34 @@ claude plugin install teams-channel@jgong5
 
 ### Launch
 
-The channel is not in Claude Code's official allowlist, so a session loads it
-only under the development-channels flag, with `TEAMS_STATE_DIR` pointing at the
-state the setup skill wrote:
+Run `/teams-channel` first; it walks through sign-in and chat creation and prints
+these commands filled in. `launch.py` keeps the session in tmux:
 
 ```bash
-TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@jgong5
+TEAMS_STATE_DIR=<state dir> python3 \
+  ~/.claude/plugins/cache/jgong5/teams-channel/<version>/skills/teams-channel/launch.py \
+  install --agent <chat name> --workdir <project dir>
+claude-teams start      # then: claude-teams attach | status | stop
 ```
 
-Run `/teams-channel` first; it walks through sign-in and chat creation and prints
-this command filled in. The flag is for local channel development only.
+- **One agent per machine.** `--agent` defaults to `<short hostname>-agent`; it
+  names the tmux session `claude-<agent>` and, unless `TEAMS_STATE_DIR` is set,
+  the state directory `~/.claude/channels/<agent>`.
+- **A clean environment.** A tmux server hands new sessions the environment of
+  whoever started it, so a session started from inside another Claude session
+  inherited that session's id and took itself for its child. `claude` runs
+  under `env -i` with a short allowlist of variables.
+- **No manual steps.** The channel is outside Claude Code's channel allowlist,
+  so every start asks to confirm the development-channels flag; `launch.py`
+  confirms it, and when this session's `server.py` has not come up it
+  reconnects the server from `/mcp`, exiting non-zero if it is still down.
+
+Arguments after `--` go to `claude`. `install` writes `~/.local/bin/claude-teams`
+with its options and the state directory fixed in it, refuses to overwrite a
+file it did not write, and
+needs running again after a plugin update. Without tmux, the bare command is
+`TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@jgong5`.
+The flag is for local channel development only.
 
 ### Requirements
 
@@ -479,6 +497,7 @@ this command filled in. The flag is for local channel development only.
 - **Python 3.10 or newer, standard library only.** The server and its Teams
   client are pure stdlib; there is nothing to install beyond Python and Claude
   Code itself.
+- **tmux**, for `launch.py`.
 
 ## Update
 
@@ -531,7 +550,7 @@ skills/
                          # pr_state.py, land.py
   gh-prose/              # SKILL.md + lint_gh_prose.py
   teams-channel/         # SKILL.md + server.py (inline MCP channel server),
-                         # teams_client.py
+                         # teams_client.py, launch.py (tmux launcher)
 tests/
   asm_tutorial/          # pytest suite for asm-tutorial's scripts
   kernel_perf/           # pytest suite for the bank model and the probe
@@ -542,7 +561,8 @@ tests/
   agent_team/            # pytest suite for agent-team's scripts
   gh_prose/              # pytest suite for the lint, over real samples
   teams_channel/         # pytest suite for the Teams client, the server,
-                         # and the real manifest's inline MCP server
+                         # the launcher, and the real manifest's inline
+                         # MCP server
 ```
 
 Skills live flat under `skills/`; nothing on disk records which bundle a skill

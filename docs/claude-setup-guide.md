@@ -22,7 +22,7 @@
 | skills 插件（第 2 节） | `lirui927/skills` | 不需要 |
 | agent-team（第 3 节） | `lirui927/skills` | 不需要；但两台操作的是同一个 GitHub 仓库，`run` 只能在一台上跑 |
 | Web UI（第 4 节） | `lirui927/claudecodeui` | 不需要 |
-| Teams（第 5 节） | 正式插件做完后从 `lirui927/skills` 安装 | 不需要；每台机器一个群聊 |
+| Teams（第 5 节） | `lirui927/skills` 里的 `teams-channel` 插件 | 不需要；每台机器一个群聊 |
 
 如果两台恰好共用同一个 home（同一个共享文件系统），`~/.claude`、`~/.config`、`~/lirui` 下的东西已经都在了，只要注意**不要两台同时跑同一个东西**。
 
@@ -276,54 +276,40 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 
 **每台机器各自独立**：每台机器常驻一个自己的 Claude 会话，对应 Teams 里一个只有你一个成员的群聊，按机器命名：原机器是「355-agent」，新机器用「455-agent」。手机上打开哪个群，就是在指挥哪台机器。两台的登录、群聊、状态文件互不相干，不需要网络互通。以后想加更多 agent（再加一台机器，或者同一台机器上为不同项目各开一个），也是同样的规则：**一个 agent 对应一个群聊和一个状态目录**（插件里是 `TEAMS_STATE_DIR`）。
 
-### 5.1 新机器（455-agent）：等正式插件
+### 5.1 安装和启动（355 和 455 一样）
 
-原机器现在用的是一个临时桥接（见 5.2），它的文件不在任何仓库里，而且其中的 Teams 脚本是同事内部脚本的副本，不能公开，所以没法拿到新机器上。
+每台机器各做一遍，`<agent>` 是这台机器的群聊名：`355-agent` 或 `455-agent`。具体以插件的 README 为准。
 
-新机器等正式的 Teams 通道插件 `teams-channel`（本仓库 issue #2、#3；#1 已合并）。做完后的步骤大致如下，具体以插件的 README 为准：
-
-1. 按第 2 节更新 marketplace，安装 `teams-channel@jgong5`。
-2. 运行插件的设置 skill：用 `<你的 AMD 邮箱>` 登录，建一个叫 `455-agent` 的群聊（默认名就是 `<主机名>-agent`）。
-3. 在 tmux 里以通道模式启动：
+1. 按第 2 节更新 marketplace，安装 `teams-channel@jgong5`，重载。
+2. 运行插件的设置 skill `/teams-channel:teams-channel`：用 `<你的 AMD 邮箱>` 登录，建一个叫 `<agent>` 的群聊，状态目录用 `~/.claude/channels/<agent>`。
+3. 第一次在 `~/lirui` 用 Claude 的话，先在那里手动运行一次 `claude`，确认"信任 ~/lirui"后退出。
+4. 机器上已有手写的 `claude-teams`（355 上就有）：先 `claude-teams stop`，再把 `~/.local/bin/claude-teams` 移走，因为 `install` 不覆盖不是它写的文件。
+5. 写启动脚本并启动：
    ```bash
-   tmux new -s claude-teams -c ~/lirui \
-     claude --dangerously-load-development-channels plugin:teams-channel@jgong5
+   T=$(ls -d ~/.claude/plugins/cache/jgong5/teams-channel/*/skills/teams-channel | sort -V | tail -1)
+   python3 $T/launch.py install --agent <agent> --workdir ~/lirui
+   claude-teams start     # 自动确认开发通道警告；服务没起来就到 /mcp 里重连
+   claude-teams status    # 应显示"teams-channel 服务已连上"
    ```
-   第一次要 `tmux attach -t claude-teams` 进去确认"信任 ~/lirui"，再 `Ctrl-b d` 退出查看。
-4. 手机 Teams →「455-agent」→ 发"你好"。
+   355 是共享账号，`install` 那行换成下面这样，给会话加一段隔离提示：
+   ```bash
+   PROMPT="This session is lirui's Teams agent for this machine (355-agent). For anything Teams, email, calendar or other Microsoft 365, use only the teams-channel tools. Never use the claude-home or m365-* skills, or anything under ~/.claude/skills/m365-* or ~/.config/microsoft-graph: they sign in as someone else or would answer the chat a second time."
+   python3 $T/launch.py install --agent 355-agent --workdir ~/lirui -- --append-system-prompt "$PROMPT"
+   ```
+6. 手机 Teams →「<agent>」→ 发"你好"。
 
-插件比临时桥接好在：消息由插件推进会话，不再依赖每 30 分钟重新挂一次的轮询；Claude 需要权限时会把请求发到群里，回复 `yes xxxxx` 或 `no xxxxx` 就行。
+日常操作：`claude-teams attach` 进去查看（`Ctrl-b d` 退出查看），`claude-teams stop` 停止，机器重启后 `claude-teams start`。插件更新后要重新运行第 5 步的 `install`，因为启动脚本里写的是当时那个版本的路径。
 
-### 5.2 原机器（355-agent）：现在的临时桥接
+启动脚本还会：用 `env -i` 只传少数环境变量，免得新会话继承启动它的 Claude 会话的身份；自动确认开发通道警告；确认后本会话下没有 `server.py` 就去 `/mcp` 里 Reconnect，还是没有就以非零退出。
 
-**工作方式**：tmux 里常驻一个 Claude 会话，每 2 秒查一次「355-agent」群。你在手机上直接发消息，不用任何前缀，它执行完后回复到群里，回复以 `[Claude]` 开头。消息显示的是你自己的账号，因为用的是你的登录，不是独立的机器人。
+消息由插件推进会话；Claude 需要权限时会把请求发到群里，回复 `yes xxxxx` 或 `no xxxxx` 就行。
 
-涉及的文件（只在原机器上）：
+**隔离**：共享账号上其他人的 Teams 和 M365 skill（例如 `~/.claude/skills/claude-home`、`~/.claude/skills/m365-*`）和它们的凭证目录 `~/.config/microsoft-graph/` 都是别人的。插件只从自己的状态目录读登录，不读这些路径；上面那段提示让会话也不去用那些 skill。
 
-| 路径 | 内容 |
-|---|---|
-| `~/lirui/.claude/skills/teams-bridge/` | skill 本体：`SKILL.md`、`bridge_poll.py`、`scripts/`（一套 Teams 脚本的私有副本，已改成只用你自己的凭证） |
-| `~/.local/bin/claude-teams` | tmux 启动脚本：`start` / `attach` / `status` / `stop` |
-| `~/.config/microsoft-graph-lirui/` | 你的 Teams 登录凭证、群聊 ID（`bridge_chat_id`）、读到哪条（`bridge_lastid`），权限 700 |
+### 5.2 已知限制和风险
 
-**隔离**：共享账号上其他人的 Teams 和 M365 skill（例如 `~/.claude/skills/claude-home`、`~/.claude/skills/m365-*`）和它们的凭证目录 `~/.config/microsoft-graph/` 都是别人的。副本已经改成绝不读这些路径，也不读 `MS_ACCESS_TOKEN` 环境变量。启动脚本还会提示会话不要用那些 skill。
-
-日常操作：
-
-| 情况 | 做法 |
-|---|---|
-| 看它在干什么 | `claude-teams attach`（`Ctrl-b d` 退出查看） |
-| 收不到回复 | `claude-teams status`；看到 `[poll-error]` 说明登录过期或网络有问题 → 运行 `python3 ~/lirui/.claude/skills/teams-bridge/scripts/auth.py` 和它打印的 `--complete` 命令重新登录 → `claude-teams stop && claude-teams start` |
-| 改了 skill 或脚本 | `claude-teams stop && claude-teams start` |
-| 机器重启后 | `claude-teams start` |
-
-插件做完后，原机器也换成 5.1 的方式：先 `claude-teams stop`，再按 5.1 安装和启动，群聊名用 `355-agent`。
-
-### 5.3 已知限制和风险
-
-- 临时桥接靠会话里每 30 分钟重新挂一次的 Monitor 维持，偶尔会断，断了就重启。
-- 如果 `~/.claude/settings.json` 里 `defaultMode` 是 `bypassPermissions`，**手机发来的指令会直接执行，不会弹确认**。临时桥接的 skill 要求删除、杀进程、推代码之前先在群里问你，但这只是对 Claude 的要求，不是硬性限制。
-- 临时桥接和插件用的都是 Teams 网页版的内部接口，没有公开文档，微软改了就可能失效。
+- 如果 `~/.claude/settings.json` 里 `defaultMode` 是 `bypassPermissions`，**手机发来的指令会直接执行，不会弹确认**。
+- 插件用的是 Teams 网页版的内部接口，没有公开文档，微软改了就可能失效。
 
 ---
 
