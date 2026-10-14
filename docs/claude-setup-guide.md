@@ -15,12 +15,16 @@
 
 ## 0. 先确认两件事
 
-**新机器和原机器是否共用同一个 home？**
+**两台机器按"各自独立"来配**：例如原机器叫 355-agent，新机器叫 455-agent。两台之间不需要网络互通，各有自己的 home、自己的登录、自己的 Teams 群聊。需要的东西全部从 GitHub 获取：
 
-| 情况 | 影响 |
-|---|---|
-| 共用同一个 home（同一个共享文件系统） | `~/.claude`、`~/.config`、`~/lirui` 下的东西已经都在了。主要是**不要两台机器同时跑同一个东西**（见第 3、5 节） |
-| 独立的 home | 按下面每一步完整做一遍；第 5 节的 Teams 文件需要从原机器拷过去 |
+| 内容 | 来源 | 需要互通吗 |
+|---|---|---|
+| skills 插件（第 2 节） | `lirui927/skills` | 不需要 |
+| agent-team（第 3 节） | `lirui927/skills` | 不需要；但两台操作的是同一个 GitHub 仓库，`run` 只能在一台上跑 |
+| Web UI（第 4 节） | `lirui927/claudecodeui` | 不需要 |
+| Teams（第 5 节） | 正式插件做完后从 `lirui927/skills` 安装 | 不需要；每台机器一个群聊 |
+
+如果两台恰好共用同一个 home（同一个共享文件系统），`~/.claude`、`~/.config`、`~/lirui` 下的东西已经都在了，只要注意**不要两台同时跑同一个东西**。
 
 **基础工具**（原机器上的版本，供参考）：
 
@@ -204,7 +208,7 @@ tmux new -s agent-team -c ~/lirui/skills claude
 - 贴 **`hold landing`**：只阻止合并，开发和 review 照常。
 - 合并**不需要你批准**：reviewer 给出 APPROVE 后直接 squash 进 `main`。
 
-**一个仓库同一时间只跑一个 `run`。** 之前同时开了三个 run 会话，互相重复认领、争着合并，最后靠会话之间互发消息才收敛成一个。两台机器共用 home 时更要注意：只在一台机器上跑。
+**一个仓库同一时间只跑一个 `run`。** 之前同时开了三个 run 会话，互相重复认领、争着合并，最后靠会话之间互发消息才收敛成一个。两台机器即使不互通也一样：它们操作的是同一个 GitHub 仓库，所以只在一台机器上跑 `run`。
 
 ---
 
@@ -270,11 +274,31 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 
 **为什么用 Teams**：Discord、Telegram、Claude App 在大陆都要 VPN；Teams 不用。Discord 方案已放弃。
 
-**工作方式**：Teams 里有一个只有你一个成员的群聊「Claude Agent」。tmux 里常驻一个 Claude 会话，每 2 秒查一次这个群。你在手机上直接发消息，不用任何前缀，它执行完后回复到群里，回复以 `[Claude]` 开头。消息显示的是你自己的账号，因为用的是你的登录，不是独立的机器人。
+**每台机器各自独立**：每台机器常驻一个自己的 Claude 会话，对应 Teams 里一个只有你一个成员的群聊，按机器命名：原机器是「355-agent」，新机器用「455-agent」。手机上打开哪个群，就是在指挥哪台机器。两台的登录、群聊、状态文件互不相干，不需要网络互通。以后想加更多 agent（再加一台机器，或者同一台机器上为不同项目各开一个），也是同样的规则：**一个 agent 对应一个群聊和一个状态目录**（插件里是 `TEAMS_STATE_DIR`）。
 
-### 5.1 涉及的文件
+### 5.1 新机器（455-agent）：等正式插件
 
-这些文件不在任何仓库里，只在原机器上：
+原机器现在用的是一个临时桥接（见 5.2），它的文件不在任何仓库里，而且其中的 Teams 脚本是同事内部脚本的副本，不能公开，所以没法拿到新机器上。
+
+新机器等正式的 Teams 通道插件 `teams-channel`（本仓库 issue #2、#3；#1 已合并）。做完后的步骤大致如下，具体以插件的 README 为准：
+
+1. 按第 2 节更新 marketplace，安装 `teams-channel@jgong5`。
+2. 运行插件的设置 skill：用 `<你的 AMD 邮箱>` 登录，建一个叫 `455-agent` 的群聊（默认名就是 `<主机名>-agent`）。
+3. 在 tmux 里以通道模式启动：
+   ```bash
+   tmux new -s claude-teams -c ~/lirui \
+     claude --dangerously-load-development-channels plugin:teams-channel@jgong5
+   ```
+   第一次要 `tmux attach -t claude-teams` 进去确认"信任 ~/lirui"，再 `Ctrl-b d` 退出查看。
+4. 手机 Teams →「455-agent」→ 发"你好"。
+
+插件比临时桥接好在：消息由插件推进会话，不再依赖每 30 分钟重新挂一次的轮询；Claude 需要权限时会把请求发到群里，回复 `yes xxxxx` 或 `no xxxxx` 就行。
+
+### 5.2 原机器（355-agent）：现在的临时桥接
+
+**工作方式**：tmux 里常驻一个 Claude 会话，每 2 秒查一次「355-agent」群。你在手机上直接发消息，不用任何前缀，它执行完后回复到群里，回复以 `[Claude]` 开头。消息显示的是你自己的账号，因为用的是你的登录，不是独立的机器人。
+
+涉及的文件（只在原机器上）：
 
 | 路径 | 内容 |
 |---|---|
@@ -284,78 +308,22 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 
 **隔离**：共享账号上其他人的 Teams 和 M365 skill（例如 `~/.claude/skills/claude-home`、`~/.claude/skills/m365-*`）和它们的凭证目录 `~/.config/microsoft-graph/` 都是别人的。副本已经改成绝不读这些路径，也不读 `MS_ACCESS_TOKEN` 环境变量。启动脚本还会提示会话不要用那些 skill。
 
-### 5.2 两台机器怎么分工
-
-**推荐：只在一台机器上跑桥接。** 要操作另一台机器，直接在群里说"去 455 上执行 xxx"，Claude 会 ssh 过去。
-
-原因：如果两台共用 home，凭证、`bridge_chat_id`、`bridge_lastid` 也是共用的，两台同时跑会抢同一个群的消息、重复回复。要在两台上各跑一个独立的桥接，需要先改脚本，按主机名区分群聊 ID 和状态文件。
-
-### 5.3 在新机器上部署（独立 home 的情况）
-
-**第 1 步，拷文件**（在原机器上执行）：
-
-```bash
-rsync -a --exclude __pycache__ ~/lirui/.claude/skills/teams-bridge/ <新机器>:~/lirui/.claude/skills/teams-bridge/
-scp ~/.local/bin/claude-teams <新机器>:~/.local/bin/
-```
-
-凭证不要拷，在新机器上重新登录。启动脚本里写死了 `WORKDIR=$HOME/lirui`，新机器的目录结构不同的话要改。
-
-**第 2 步，登录**（在新机器终端里）：
-
-```bash
-python3 ~/lirui/.claude/skills/teams-bridge/scripts/auth.py
-# 打开打印的 microsoft.com/devicelogin，输入验证码，用 <你的 AMD 邮箱> 登录
-# 然后运行它最后打印的 --complete 命令
-python3 ~/lirui/.claude/skills/teams-bridge/scripts/auth.py --status   # Authenticated: YES
-python3 ~/lirui/.claude/skills/teams-bridge/scripts/whoami.py          # 必须是 <你的 AMD 邮箱>
-```
-
-**第 3 步，建这台机器专用的群聊**。在 `~/lirui` 下运行，**不要在 `/tmp` 下运行**；先把 `MY_MAIL` 改成你的邮箱：
-
-```bash
-cd ~/lirui && python3 - <<'EOF'
-MY_MAIL = '<你的 AMD 邮箱>'
-import sys, os
-sys.path.insert(0, os.path.expanduser('~/lirui/.claude/skills/teams-bridge/scripts'))
-from graph_client import GraphClient
-from skype_client import SkypeClient
-me = GraphClient().get('/me', params={'$select': 'id,mail'})
-assert me['mail'].lower() == MY_MAIL.lower(), me['mail']
-code, tid, detail = SkypeClient().create_thread([me['id']], one_on_one=False, topic='Claude Agent 455')
-print(code, tid, detail)
-open(os.path.expanduser('~/.config/microsoft-graph-lirui/bridge_chat_id'), 'w').write(tid)
-EOF
-```
-
-**第 4 步，启动**：
-
-```bash
-claude-teams start
-claude-teams attach   # 第一次会弹"是否信任 ~/lirui"，选 Yes；然后 Ctrl-b d 退出查看
-claude-teams status   # 应看到"已上线"，并且有 1 monitor 在运行
-```
-
-**第 5 步，用手机试**：Teams → 聊天 →「Claude Agent 455」→ 发"你好"，几秒内会收到 `[Claude]` 开头的回复。
-
-### 5.4 日常操作
+日常操作：
 
 | 情况 | 做法 |
 |---|---|
 | 看它在干什么 | `claude-teams attach`（`Ctrl-b d` 退出查看） |
-| 收不到回复 | `claude-teams status`；看到 `[poll-error]` 说明登录过期或网络有问题 → 重做 5.3 第 2 步 → `claude-teams stop && claude-teams start` |
+| 收不到回复 | `claude-teams status`；看到 `[poll-error]` 说明登录过期或网络有问题 → 运行 `python3 ~/lirui/.claude/skills/teams-bridge/scripts/auth.py` 和它打印的 `--complete` 命令重新登录 → `claude-teams stop && claude-teams start` |
 | 改了 skill 或脚本 | `claude-teams stop && claude-teams start` |
 | 机器重启后 | `claude-teams start` |
 
-### 5.5 已知限制和风险
+插件做完后，原机器也换成 5.1 的方式：先 `claude-teams stop`，再按 5.1 安装和启动，群聊名用 `355-agent`。
 
-- 桥接靠会话里每 30 分钟重新挂一次的 Monitor 维持，偶尔会断，断了就重启。
-- 如果 `~/.claude/settings.json` 里 `defaultMode` 是 `bypassPermissions`，**手机发来的指令会直接执行，不会弹确认**。skill 里要求删除、杀进程、推代码之前先在群里问你，但这只是对 Claude 的要求，不是硬性限制。
-- 部分接口是 Teams 网页版用的内部接口，没有公开文档，微软改了就可能失效。
+### 5.3 已知限制和风险
 
-### 5.6 后续：完整的 Teams 通道插件
-
-正在用 agent-team 开发正式的通道插件，见本仓库的 issue #1 到 #3。它会把"会话自己轮询"换成插件推送：不再需要每 30 分钟重新挂一次，手机上可以回复 `yes xxxxx` 批准权限，并且作为一个 bundle 用第 2 节的方式安装。完成后这一节会换成插件的安装方式。
+- 临时桥接靠会话里每 30 分钟重新挂一次的 Monitor 维持，偶尔会断，断了就重启。
+- 如果 `~/.claude/settings.json` 里 `defaultMode` 是 `bypassPermissions`，**手机发来的指令会直接执行，不会弹确认**。临时桥接的 skill 要求删除、杀进程、推代码之前先在群里问你，但这只是对 Claude 的要求，不是硬性限制。
+- 临时桥接和插件用的都是 Teams 网页版的内部接口，没有公开文档，微软改了就可能失效。
 
 ---
 
@@ -367,7 +335,7 @@ claude-teams status   # 应看到"已上线"，并且有 1 monitor 在运行
 | 直接 `gh auth login` | 会改掉共享账号的默认 gh 身份，必须带 `GH_CONFIG_DIR` |
 | `.git/info/exclude` 不加 `/` | `skills/` 会匹配任何层级的 `skills/` 目录 |
 | 多个 `/agent-team run` | 同一仓库只跑一个，两台机器也只在一台上跑 |
-| 两台机器跑同一个 Teams 群的桥接 | 会抢消息、重复回复，每台机器一个群或只跑一台 |
+| 两台机器用同一个 Teams 群 | 会抢消息、重复回复。每台机器一个群：`355-agent`、`455-agent` |
 | 插件命令找不到 | 用带前缀的写法：`/agent-team:agent-team`、`/amd-gpu:kernel-perf`；装完记得重载窗口 |
 | fork 插件改了不生效 | `marketplace.json` 里没升 `version` |
 | Web UI 打不开 | 用 `http://` 而不是 `https://`；端口转发要转 5173 |
