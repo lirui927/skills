@@ -67,6 +67,10 @@ class FakeChat:
         """A message the signed-in person typed into the chat."""
         return self._add(content, USER_MRI, messagetype)
 
+    def add_foreign_message(self, content: str) -> dict:
+        """A message from a different account than the signed-in one."""
+        return self._add(content, "8:orgid:someone-else-99", "Text")
+
     def list_newest_first(self) -> list[dict]:
         with self.lock:
             return list(reversed(self.messages))
@@ -191,8 +195,14 @@ class Harness:
             time.sleep(0.02)
         return None
 
-    def none_matches(self, predicate, window: float = 1.0) -> bool:
-        """True when no received message matches ``predicate`` within window."""
+    def none_matches(self, predicate, window: float = 2.5) -> bool:
+        """True when no received message matches ``predicate`` within window.
+
+        The window must run past one POLL_INTERVAL: a message the server
+        wrongly relays lands on the next poll, so a window equal to the poll
+        would miss it just as it closes and the negative pin would stay green
+        against broken code.
+        """
         return self.recv(predicate, timeout=window) is None
 
     def handshake(self):
@@ -382,6 +392,18 @@ def test_claude_prefixed_messages_are_not_relayed(harness):
     harness.fake._add("[Claude] my own words", USER_MRI)
     assert harness.none_matches(
         lambda m: m.get("method") == "notifications/claude/channel"
+    )
+
+
+def test_a_message_from_another_sender_is_not_relayed(harness):
+    harness.handshake()
+    harness.wait_watching()
+    # Only the signed-in user's messages are relayed; a different sender id is
+    # dropped even though it reaches the same chat.
+    harness.fake.add_foreign_message("hi from a stranger")
+    assert harness.none_matches(
+        lambda m: m.get("method") == "notifications/claude/channel"
+        and "stranger" in m["params"]["content"]
     )
 
 
