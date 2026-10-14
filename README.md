@@ -9,6 +9,7 @@ section for what it does and how to install it.
 | [`amd-gpu`](#amd-gpu) | `kernel-perf`, `asm-tutorial` | Find a CDNA kernel's bottleneck by ablation; turn its assembly into a verified PDF tutorial |
 | [`code-study`](#code-study) | `implementation-study`, `architecture-study` | Turn code you did not write into a diagram-first, evidence-grounded, verified PDF study -- one algorithm, or a whole system's architecture |
 | [`agent-team`](#agent-team) | `agent-team`, `gh-prose` | Run developer and reviewer agents over a GitHub issue pool, from brief to squash landing, with the owner ruling only on escalations |
+| [`teams-channel`](#teams-channel) | `teams-channel` | Talk to a running session from Microsoft Teams: an MCP channel server relays one self-chat into the session, and a setup skill signs in and wires it up |
 
 ## pr-review-kit
 
@@ -421,6 +422,64 @@ claude plugin install agent-team@jgong5
 `agent-team` is **user-invoked only**: an autonomous team that pushes and
 lands is not something to start by mentioning a PR.
 
+## teams-channel
+
+Talk to a Claude Code session from Microsoft Teams. This bundle ships an **MCP
+channel server** that relays one Teams chat into a running session: a message
+you send in the chat reaches the session, and the session's replies and its
+permission prompts come back to the same chat, so you can drive and approve work
+from your phone. It is the Teams counterpart of the official Discord channel.
+
+Unlike every other bundle here, `teams-channel` declares its server **inline in
+the manifest**, so installing the bundle is all it takes to wire the server into
+Claude Code. `claude plugin details teams-channel` shows one skill and one MCP
+server; every other bundle still shows zero MCP servers.
+
+| Skill | Invocation | What it does |
+| --- | --- | --- |
+| `teams-channel` | `/teams-channel` | Signs in to Teams with a device code, creates the one self-chat the session relays, records its id, and prints the command that launches a session with the channel attached. |
+
+The server serves exactly **one chat per agent**, the one recorded at
+`TEAMS_STATE_DIR/chat_id`. Give each agent that shares a home its own
+`TEAMS_STATE_DIR` and its own chat, or two agents relay the same chat and answer
+over each other. The setup skill names each chat `<short hostname>-agent` unless
+you name it.
+
+### Install
+
+```
+/plugin marketplace add jgong5/skills
+/plugin install teams-channel@jgong5
+```
+
+Or from your shell:
+
+```bash
+claude plugin marketplace add jgong5/skills
+claude plugin install teams-channel@jgong5
+```
+
+### Launch
+
+The channel is not in Claude Code's official allowlist, so a session loads it
+only under the development-channels flag, with `TEAMS_STATE_DIR` pointing at the
+state the setup skill wrote:
+
+```bash
+TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@jgong5
+```
+
+Run `/teams-channel` first; it walks through sign-in and chat creation and prints
+this command filled in. The flag is for local channel development only.
+
+### Requirements
+
+- **A Microsoft Teams account** you can sign in to with a device code. Sign-in
+  uses the Teams desktop client's public app id and needs no secret.
+- **Python 3.10 or newer, standard library only.** The server and its Teams
+  client are pure stdlib; there is nothing to install beyond Python and Claude
+  Code itself.
+
 ## Update
 
 ```
@@ -428,7 +487,8 @@ lands is not something to start by mentioning a PR.
 /plugin update <bundle>@jgong5
 ```
 
-where `<bundle>` is `pr-review-kit`, `amd-gpu`, `code-study`, or `agent-team`.
+where `<bundle>` is `pr-review-kit`, `amd-gpu`, `code-study`, `agent-team`, or
+`teams-channel`.
 Same commands work as `claude plugin ...` from the shell. Updates apply on
 restart.
 
@@ -470,6 +530,8 @@ skills/
                          # develop.md, review.md, land.md, overlay.py,
                          # pr_state.py, land.py
   gh-prose/              # SKILL.md + lint_gh_prose.py
+  teams-channel/         # SKILL.md + server.py (inline MCP channel server),
+                         # teams_client.py
 tests/
   asm_tutorial/          # pytest suite for asm-tutorial's scripts
   kernel_perf/           # pytest suite for the bank model and the probe
@@ -479,6 +541,8 @@ tests/
                          # and reference docs
   agent_team/            # pytest suite for agent-team's scripts
   gh_prose/              # pytest suite for the lint, over real samples
+  teams_channel/         # pytest suite for the Teams client, the server,
+                         # and the real manifest's inline MCP server
 ```
 
 Skills live flat under `skills/`; nothing on disk records which bundle a skill
