@@ -89,6 +89,33 @@
         "./skills/agent-team",
         "./skills/gh-prose"
       ]
+    },
+    {
+      "name": "teams-channel",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Talk to a Claude Code session from Microsoft Teams: an MCP channel server that relays one self-chat into the session, plus a setup skill that signs in, creates the chat, and prints the launch command.",
+      "category": "productivity",
+      "keywords": [
+        "teams",
+        "microsoft",
+        "channel",
+        "chat",
+        "mcp",
+        "notifications",
+        "remote"
+      ],
+      "skills": [
+        "./skills/teams-channel"
+      ],
+      "mcpServers": {
+        "teams-channel": {
+          "command": "python3",
+          "args": [
+            "${CLAUDE_PLUGIN_ROOT}/skills/teams-channel/server.py"
+          ]
+        }
+      }
     }
   ]
 }
