@@ -276,21 +276,24 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 
 **每台机器各自独立**：每台机器常驻一个自己的 Claude 会话，对应 Teams 里一个只有你一个成员的群聊，按机器命名：原机器是「355-agent」，新机器用「455-agent」。手机上打开哪个群，就是在指挥哪台机器。两台的登录、群聊、状态文件互不相干，不需要网络互通。以后想加更多 agent（再加一台机器，或者同一台机器上为不同项目各开一个），也是同样的规则：**一个 agent 对应一个群聊和一个状态目录**（插件里是 `TEAMS_STATE_DIR`）。
 
-### 5.1 新机器（455-agent）：等正式插件
+### 5.1 新机器（455-agent）：用 teams-channel 插件
 
-原机器现在用的是一个临时桥接（见 5.2），它的文件不在任何仓库里，而且其中的 Teams 脚本是同事内部脚本的副本，不能公开，所以没法拿到新机器上。
+原机器现在用的是一个临时桥接（见 5.2），它的文件不在任何仓库里，而且其中的 Teams 脚本是同事内部脚本的副本，不能公开，所以没法拿到新机器上。新机器直接用插件 `teams-channel`，具体以插件的 README 为准：
 
-新机器等正式的 Teams 通道插件 `teams-channel`（本仓库 issue #2、#3；#1 已合并）。做完后的步骤大致如下，具体以插件的 README 为准：
-
-1. 按第 2 节更新 marketplace，安装 `teams-channel@jgong5`。
-2. 运行插件的设置 skill：用 `<你的 AMD 邮箱>` 登录，建一个叫 `455-agent` 的群聊（默认名就是 `<主机名>-agent`）。
-3. 在 tmux 里以通道模式启动：
+1. 按第 2 节更新 marketplace，安装 `teams-channel@jgong5`，重载。
+2. 运行插件的设置 skill `/teams-channel:teams-channel`：用 `<你的 AMD 邮箱>` 登录，建一个叫 `455-agent` 的群聊，状态目录用 `~/.claude/channels/455-agent`。
+3. 第一次在 `~/lirui` 用 Claude 的话，先在那里手动运行一次 `claude`，确认"信任 ~/lirui"后退出。
+4. 写启动脚本并启动：
    ```bash
-   tmux new -s claude-teams -c ~/lirui \
-     claude --dangerously-load-development-channels plugin:teams-channel@jgong5
+   T=$(ls -d ~/.claude/plugins/cache/jgong5/teams-channel/*/skills/teams-channel | sort -V | tail -1)
+   python3 $T/launch.py install --agent 455-agent --workdir ~/lirui
+   claude-teams start     # 自动确认开发通道警告；服务没起来就到 /mcp 里重连
+   claude-teams status    # 应显示"teams-channel 服务已连上"
    ```
-   第一次要 `tmux attach -t claude-teams` 进去确认"信任 ~/lirui"，再 `Ctrl-b d` 退出查看。
-4. 手机 Teams →「455-agent」→ 发"你好"。
+   `claude-teams attach` 进去查看（`Ctrl-b d` 退出查看），`claude-teams stop` 停止。插件更新后要重新运行这里的 `install`，因为启动脚本里写的是当时那个版本的路径。
+5. 手机 Teams →「455-agent」→ 发"你好"。
+
+启动脚本做的三件事：用 `env -i` 只传少数环境变量，免得新会话继承启动它的 Claude 会话的身份；自动确认开发通道警告；确认后本会话下没有 `server.py` 就去 `/mcp` 里 Reconnect，还是没有就以非零退出。
 
 插件比临时桥接好在：消息由插件推进会话，不再依赖每 30 分钟重新挂一次的轮询；Claude 需要权限时会把请求发到群里，回复 `yes xxxxx` 或 `no xxxxx` 就行。
 
@@ -317,7 +320,7 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 | 改了 skill 或脚本 | `claude-teams stop && claude-teams start` |
 | 机器重启后 | `claude-teams start` |
 
-插件做完后，原机器也换成 5.1 的方式：先 `claude-teams stop`，再按 5.1 安装和启动，群聊名用 `355-agent`。
+换成插件：先 `claude-teams stop`，把手写的 `~/.local/bin/claude-teams` 移走（`install` 不覆盖不是它写的文件），再按 5.1 安装和启动，agent 名用 `355-agent`。现在的启动脚本会给会话加一段提示，让它不用别人的 Teams 和 M365 skill；要保留，在 `install` 命令末尾加 `-- --append-system-prompt "<那段提示>"`。
 
 ### 5.3 已知限制和风险
 
