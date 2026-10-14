@@ -65,19 +65,18 @@ the launch, so sign-in, chat creation and the server all read the same state.
 4. **Print the launch commands.** The channel is not in Claude Code's official
    allowlist, so it loads only under the development-channels flag, and every
    start asks to confirm that flag. `<skill-dir>/launch.py` keeps such a
-   session in tmux and answers that prompt. Give the person these two
-   commands, with the chat name from step 1 as the agent:
+   session in tmux and answers that prompt. Give the person these commands,
+   with the state directory from step 1 and the chat name as the agent:
 
    ```
-   python3 <skill-dir>/launch.py install --agent <chat name> --workdir <project dir>
+   TEAMS_STATE_DIR=<state dir> python3 <skill-dir>/launch.py install --agent <chat name> --workdir <project dir>
    claude-teams start
    ```
 
-   `install` writes `~/.local/bin/claude-teams` with those options fixed in it;
-   `claude-teams attach|status|stop` then watch, check and end the session.
-   The agent name picks the tmux session (`claude-<agent>`) and, when
-   `TEAMS_STATE_DIR` is unset, the state directory `~/.claude/channels/<agent>`,
-   so it must match the directory from step 1. Arguments after `--` go to
+   `install` writes `~/.local/bin/claude-teams` with those options and the
+   state directory fixed in it; `claude-teams attach|status|stop` then watch,
+   check and end the session. The agent name picks the tmux session
+   (`claude-<agent>`). Arguments after `--` go to
    `claude`. Run `launch.py` on the host, not in a container: it drives tmux and
    `claude` there. After a plugin update, run `install` again, since the wrapper
    names this version's file.

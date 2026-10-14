@@ -118,13 +118,14 @@ class Rig:
         _script(path, "import time; time.sleep(60)\n")
         self.decoys.append(subprocess.Popen([sys.executable, str(path)]))
 
-    def run(self, *args: str, exe=(sys.executable, str(LAUNCH))):
+    def run(self, *args: str, exe=(sys.executable, str(LAUNCH)), **extra_env: str):
         env = {k: v for k, v in os.environ.items() if k != "TEAMS_STATE_DIR"}
         env.update(
             PATH=f"{self.root / 'bin'}{os.pathsep}{env['PATH']}",
             HOME=str(self.home),
             CLAUDE_CODE_SESSION_ID="caller-session-id",
             CLAUDE_TEAMS_PACE="0.1",
+            **extra_env,
         )
         return subprocess.run([*exe, *args], env=env, cwd=self.root,
                               capture_output=True, text=True, timeout=60)
@@ -243,6 +244,21 @@ def test_installed_wrapper_runs_with_the_options_given_to_install(rig):
     assert new[new.index("-s") + 1] == "claude-box-agent"
     assert new[new.index("-c") + 1] == str(workdir)
     assert rig.seen_by_claude()["argv"][2:] == ["--append-system-prompt", "be brief"]
+
+
+def test_installed_wrapper_keeps_the_state_dir_set_at_install(rig):
+    rig.claude("up")
+    state = rig.root / "signed-in-elsewhere"
+    state.mkdir()
+    for name in ("token.json", "chat_id"):
+        (state / name).write_text("x")
+
+    made = rig.run("install", "--agent", "box-agent", TEAMS_STATE_DIR=str(state))
+    assert made.returncode == 0, made.stderr
+    proc = rig.run("start", exe=(str(rig.home / ".local" / "bin" / "claude-teams"),))
+
+    assert proc.returncode == 0, proc.stderr
+    assert rig.seen_by_claude()["state"] == str(state)
 
 
 def test_install_leaves_a_wrapper_it_did_not_write(rig):

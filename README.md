@@ -465,7 +465,8 @@ Run `/teams-channel` first; it walks through sign-in and chat creation and print
 these commands filled in. `launch.py` keeps the session in tmux:
 
 ```bash
-python3 ~/.claude/plugins/cache/jgong5/teams-channel/<version>/skills/teams-channel/launch.py \
+TEAMS_STATE_DIR=<state dir> python3 \
+  ~/.claude/plugins/cache/jgong5/teams-channel/<version>/skills/teams-channel/launch.py \
   install --agent <chat name> --workdir <project dir>
 claude-teams start      # then: claude-teams attach | status | stop
 ```
@@ -483,7 +484,8 @@ claude-teams start      # then: claude-teams attach | status | stop
   reconnects the server from `/mcp`, exiting non-zero if it is still down.
 
 Arguments after `--` go to `claude`. `install` writes `~/.local/bin/claude-teams`
-with its options fixed in it, refuses to overwrite a file it did not write, and
+with its options and the state directory fixed in it, refuses to overwrite a
+file it did not write, and
 needs running again after a plugin update. Without tmux, the bare command is
 `TEAMS_STATE_DIR=<state dir> claude --dangerously-load-development-channels plugin:teams-channel@jgong5`.
 The flag is for local channel development only.
