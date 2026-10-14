@@ -226,9 +226,11 @@ recording fake; the merge-async endpoint itself has no offline test.
 
 - **Every tracked file is ASCII.** Use `--` for dashes, straight quotes. Tests
   enforce this for `asm-tutorial`'s, `implementation-study`'s, and
-  `architecture-study`'s docs; the rest of the repo follows it too. The one
-  exception is `tests/gh_prose/samples/bad/`: real GitHub text kept verbatim
-  because its em dashes and CJK are what the lint must catch.
+  `architecture-study`'s docs; the rest of the repo follows it too. Two
+  exceptions: `tests/gh_prose/samples/bad/`, real GitHub text kept verbatim
+  because its em dashes and CJK are what the lint must catch; and
+  `docs/claude-setup-guide.md`, this fork owner's setup guide, written in
+  Chinese for its reader.
 - Prose in skills explains *why* a mechanism exists, not just what it does --
   the "Why this pipeline and not something simpler" sections are load-bearing,
   because a future editor who does not know why Chrome is driven over CDP
