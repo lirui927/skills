@@ -233,5 +233,5 @@ recording fake; the merge-async endpoint itself has no offline test.
   the "Why this pipeline and not something simpler" sections are load-bearing,
   because a future editor who does not know why Chrome is driven over CDP
   rather than `--print-to-pdf` will simplify it back into a bug.
-- Development runs through the superpowers SDD workflow; `.superpowers/sdd/`
+- Development runs through the superpowers SDD workflow; `docs/superpowers/`
   holds per-task briefs, reports, and review diffs and is entirely git-ignored.
