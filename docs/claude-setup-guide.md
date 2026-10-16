@@ -241,13 +241,25 @@ CONTEXT_WINDOW=160000
 
 ### 4.2 启动
 
+放进一个单独的 tmux 里跑：
+
 ```bash
 cd ~/lirui/claudecodeui
-GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
-  nohup npm run dev > /tmp/ccui-dev.log 2>&1 &
+NODEBIN=$(dirname "$(command -v node)")   # 先 nvm use，确认是要用的那个 node
+env -i HOME=$HOME USER=$USER LOGNAME=$LOGNAME SHELL=/bin/bash TERM=xterm-256color LANG=${LANG:-C.UTF-8} \
+    PATH=$NODEBIN:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  tmux -L ccui new-session -d -s ccui -c ~/lirui/claudecodeui \
+  "bash -lc 'export PATH=$NODEBIN:\$PATH GITHUB_TOKEN=\$(GH_CONFIG_DIR=\$HOME/.config/gh-lirui927 gh auth token); npm run dev 2>&1 | tee /tmp/ccui-dev.log'"
 ```
 
-`GITHUB_TOKEN` 给 UI 里的 GitHub 相关功能用。显式写 `GH_CONFIG_DIR`，保证传进去的是 lirui927 的 token，不是共享账号默认的那个。
+确认起来了：`ss -ltn | grep -E ':(5173|3001)\b'` 应该有两行。
+
+为什么这样写：
+
+- **用 tmux，不用 `nohup ... &`**：`nohup` 挡不住 SIGHUP 传到 `npm run dev` 的子进程。原机器上关掉启动它的终端后，前端和后端一起收到 SIGHUP 退出，页面一整天打不开。tmux 里的进程不受终端关闭影响。
+- **`-L ccui` 单独的 tmux 服务**：和 Teams 桥接（第 5 节，用默认的 tmux 服务）分开，互不影响。
+- **`env -i` 只传几个变量**：如果是在某个 Claude 会话里执行这条命令，那个会话的环境变量（`CLAUDE_CODE_SESSION_ID` 等）会被 tmux 带给 UI，再带给 UI 启动的每个 Claude 进程。`bash -l` 会重新读 `~/.profile`，代理之类的设置从那里来。
+- **`GITHUB_TOKEN`** 给 UI 里的 GitHub 相关功能用。显式写 `GH_CONFIG_DIR`，保证传进去的是 lirui927 的 token，不是共享账号默认的那个。`gh` 不在上面 `PATH` 里的话，把它所在的目录加进去。
 
 ### 4.3 访问
 
@@ -260,8 +272,10 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 
 | 操作 | 命令 |
 |---|---|
+| 看是否在跑 | `tmux -L ccui ls`，以及 `ss -ltn \| grep -E ':(5173\|3001)\b'` |
+| 看实时输出 | `tmux -L ccui attach -t ccui`（`Ctrl-b d` 退出查看，不会停掉它） |
 | 看日志 | `tail -f /tmp/ccui-dev.log` |
-| 停止 | `pkill -f "concurrently --kill-others"` |
+| 停止 | `tmux -L ccui kill-session -t ccui`；端口还被占着的话再 `pkill -f "concurrently --kill-others"` |
 | 重启 | 先停止，再执行 4.2 |
 | 忘记密码 | 删掉 `~/.cloudcli/auth.db`，刷新页面，重新创建账号 |
 | 更新 | `git pull`，再 `npm install`，然后重启 |
@@ -325,5 +339,6 @@ GITHUB_TOKEN=$(GH_CONFIG_DIR=~/.config/gh-lirui927 gh auth token) \
 | 插件命令找不到 | 用带前缀的写法：`/agent-team:agent-team`、`/amd-gpu:kernel-perf`；装完记得重载窗口 |
 | fork 插件改了不生效 | `marketplace.json` 里没升 `version` |
 | Web UI 打不开 | 用 `http://` 而不是 `https://`；端口转发要转 5173 |
+| Web UI 用着用着打不开了 | 先看 `tmux -L ccui ls` 和 5173、3001 端口还在不在。用 `nohup` 启动的，关掉启动它的终端就会退出，按 4.2 改用 tmux |
 | fine-grained token 过期 | 重做 1.2 |
 | tmux 里 Claude 不动 | 第一次在某个目录启动会弹信任提示，要 `attach` 进去确认 |
