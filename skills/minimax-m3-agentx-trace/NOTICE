@@ -1,0 +1,40 @@
+本 skill 的采集方法、分析方法、输出文件和列名照 qichu 的 trace-kernel-breakdown skill（版本 5ca4606）移植到
+MiniMax-M3：
+
+- extract_trace.py 原样取自该 skill 的 scripts/extract_trace.py（md5 1c3e73f40dcf86eb732c12e057ec9208），未修改。
+- m3_common.py、m3_prefill.py、m3_decode.py、m3_trace_completeness.py、m3_window.py、m3_combine_wide.py、
+  m3_rank_skew.py 是针对 MiniMax-M3 的新实现，分别对应该 skill 的 k3_tp8_prefill.py、k3_tp8_decode.py、
+  trace_completeness.py、（GLM-5.2 适配器里的窗口对账）、k3_tp8_combine_wide.py、rank_skew.py 的做法；
+  short() 的 kernel 名字整理规则和 Perfetto UI 时间的算法沿用其实现。
+- pitfalls.md 按该 skill 的踩坑清单改写，条目注明了原条目号。
+
+该 skill 以 MIT 许可发布：
+
+    MIT License
+
+    Copyright (c) 2026 qichu
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+该 skill 本身基于 ROCm/ATOM（https://github.com/ROCm/ATOM）pull request #1456 的 trace-kernel-breakdown skill
+（作者 zhuyuhua-v）。ROCm/ATOM 以 MIT 许可发布，版权声明为：
+
+    Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+
+m3_server.sh 和 m3_aiperf.sh 的服务参数和 aiperf 参数照 ROCm/ATOM 的 recipes/MiniMax-M3-Agentic-InferenceX.md。

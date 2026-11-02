@@ -116,6 +116,26 @@
           ]
         }
       }
+    },
+    {
+      "name": "atom-trace",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "In-run torch-profiler capture of an ATOM serving run under AgentX load, and a per-kernel, per-module prefill / decode breakdown of the trace reconciled against aiperf ITL. Ships a MiniMax-M3 (TP4 + EAGLE3, MI455X / gfx1250) adapter.",
+      "category": "engineering",
+      "keywords": [
+        "gpu",
+        "amd",
+        "rocm",
+        "atom",
+        "profiling",
+        "trace",
+        "llm-serving",
+        "minimax"
+      ],
+      "skills": [
+        "./skills/minimax-m3-agentx-trace"
+      ]
     }
   ]
 }

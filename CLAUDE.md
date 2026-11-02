@@ -10,9 +10,9 @@ reference docs it reads on demand, plus a few Python scripts the skill shells
 out to. Bundles ship from one marketplace entry -- `pr-review-kit`
 (`pr-explain`, `pr-review-draft`, `pr-review-dossier`), `amd-gpu`
 (`asm-tutorial`, `kernel-perf`), `code-study` (`implementation-study`,
-`architecture-study`), `agent-team` (`agent-team`, `gh-prose`), and
+`architecture-study`), `agent-team` (`agent-team`, `gh-prose`),
 `teams-channel` (`teams-channel`), the one bundle that also ships an MCP
-server. `README.md` is the user-facing documentation for every bundle; keep it
+server, and `atom-trace` (`minimax-m3-agentx-trace`). `README.md` is the user-facing documentation for every bundle; keep it
 in sync when a bundle's skills, requirements, or install story change.
 
 ## Commands

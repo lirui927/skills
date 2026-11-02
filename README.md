@@ -10,6 +10,7 @@ section for what it does and how to install it.
 | [`code-study`](#code-study) | `implementation-study`, `architecture-study` | Turn code you did not write into a diagram-first, evidence-grounded, verified PDF study -- one algorithm, or a whole system's architecture |
 | [`agent-team`](#agent-team) | `agent-team`, `gh-prose` | Run developer and reviewer agents over a GitHub issue pool, from brief to squash landing, with the owner ruling only on escalations |
 | [`teams-channel`](#teams-channel) | `teams-channel` | Talk to a running session from Microsoft Teams: an MCP channel server relays one self-chat into the session, and a setup skill signs in and wires it up |
+| [`atom-trace`](#atom-trace) | `minimax-m3-agentx-trace` | Capture a torch-profiler window inside a running ATOM AgentX benchmark and break the trace down per kernel and per module, prefill and decode, reconciled against measured ITL |
 
 ## pr-review-kit
 
@@ -499,6 +500,61 @@ The flag is for local channel development only.
   Code itself.
 - **tmux**, for `launch.py`.
 
+## atom-trace
+
+### minimax-m3-agentx-trace
+
+Captures one torch-profiler window **inside a normal AgentX benchmark run** of
+MiniMax-M3-MXFP4 served by ATOM (TP4 + EAGLE3), then turns the trace into
+per-kernel and per-module breakdowns of prefill and decode. The window opens
+600-900 s into aiperf's profiling phase and lasts 20-30 s with
+`ATOM_PROFILER_MORE=0`, so prefill and decode come from the same steady-state
+traffic rather than from a separate replay; an optional second, shorter window
+records shapes to check the derived GEMM dimensions.
+
+The analysis segments every forward on its attention core, checks the layer
+types against the model config (3 full-attention + dense-MLP layers, 57
+sparse-attention + MoE layers), assigns GEMM roles by position, and keeps the
+per-module totals exact against main-stream busy time; kernels that run in only
+a few layers are listed separately rather than lost to the median layer.
+Collectives are split into a floor and the excess over it, and a second rank's
+trace tells waiting from transfer. The window is reconciled against aiperf:
+step period, EAGLE3 tokens per step from the server log, and the share of
+interleaved prefill. Every location is given as a Perfetto UI time.
+
+The method follows qichu's `trace-kernel-breakdown` skill (MIT; see
+`skills/minimax-m3-agentx-trace/NOTICE`), whose `extract_trace.py` is included
+unmodified. The kernel-name patterns are those of ATOM + aiter on gfx1250; on
+another image, `m3_trace_completeness.py` failing is the signal to update them.
+
+The capture script has two modes. `check` never opens a GPU: it inspects the
+image in a container with no devices and reads GPU holders from
+`/sys/class/kfd/kfd/proc`. `run` waits until no other process holds a GPU,
+never stops anyone else's work, and removes only its own container on exit.
+
+### Install
+
+```
+/plugin marketplace add jgong5/skills
+/plugin install atom-trace@jgong5
+```
+
+Or from your shell:
+
+```bash
+claude plugin marketplace add jgong5/skills
+claude plugin install atom-trace@jgong5
+```
+
+### Requirements
+
+- **For the capture:** Docker, a node with four GPUs, a serving image that
+  carries ATOM (with `ATOM_ENABLE_DETAILED_ANNOTATION`), aiter, aiperf and the
+  AgentX dataset cache, and the `MiniMax-M3-MXFP4` and `MiniMax-M3-EAGLE3-GQA`
+  checkpoints.
+- **For the analysis:** Python 3.10 or newer, standard library only (`orjson`
+  is used when present). It runs on any machine; no GPU.
+
 ## Update
 
 ```
@@ -506,8 +562,8 @@ The flag is for local channel development only.
 /plugin update <bundle>@jgong5
 ```
 
-where `<bundle>` is `pr-review-kit`, `amd-gpu`, `code-study`, `agent-team`, or
-`teams-channel`.
+where `<bundle>` is `pr-review-kit`, `amd-gpu`, `code-study`, `agent-team`,
+`teams-channel`, or `atom-trace`.
 Same commands work as `claude plugin ...` from the shell. Updates apply on
 restart.
 
@@ -551,6 +607,9 @@ skills/
   gh-prose/              # SKILL.md + lint_gh_prose.py
   teams-channel/         # SKILL.md + server.py (inline MCP channel server),
                          # teams_client.py, launch.py (tmux launcher)
+  minimax-m3-agentx-trace/  # SKILL.md + pitfalls.md, reference.md,
+                         # capture_agentx.sh, m3_server.sh, m3_aiperf.sh,
+                         # analyze.sh, m3_*.py, extract_trace.py, NOTICE
 tests/
   asm_tutorial/          # pytest suite for asm-tutorial's scripts
   kernel_perf/           # pytest suite for the bank model and the probe
@@ -563,6 +622,9 @@ tests/
   teams_channel/         # pytest suite for the Teams client, the server,
                          # the launcher, and the real manifest's inline
                          # MCP server
+  minimax_m3_agentx_trace/  # pytest suite over synthetic M3 traces: segmentation,
+                         # exact totals, pairing check, window and rank skew,
+                         # and the capture driver run against stub docker/curl
 ```
 
 Skills live flat under `skills/`; nothing on disk records which bundle a skill

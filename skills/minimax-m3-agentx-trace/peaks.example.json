@@ -1,0 +1,7 @@
+{
+  "_comment": "Dense peaks of the part the trace was captured on, for the over-peak guard on derived TFLOP/s and TB/s. Fill in from the vendor spec sheet or a measured roofline; the values below are placeholders, not any real GPU.",
+  "bf16": 1000.0,
+  "fp8": 2000.0,
+  "fp4": 4000.0,
+  "hbm_tbs": 5.0
+}
