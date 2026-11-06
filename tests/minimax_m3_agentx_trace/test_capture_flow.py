@@ -1,8 +1,10 @@
 """capture_agentx.sh run 的完整流程，不用 GPU：docker 和 curl 换成桩（只认脚本用到的子命令，其余返回 99），
-KFD 换成临时目录。检查窗口的时序和记录、传给服务的环境、只动自己的容器、退出时删掉容器，以及接上的 analyze.sh。"""
+KFD 换成临时目录。检查窗口的时序和记录、传给服务的环境、只动自己的容器、退出时删掉容器，以及接上的 analyze.sh
+和用它的输出做的 Excel（m3_xlsx.py）。"""
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -10,7 +12,7 @@ import sys
 import pytest
 
 import m3_common as mc
-from m3_synth import SKILL_DIR, build_window, m3_config, write_aiperf
+from m3_synth import PREFILL_NAME, SKILL_DIR, build_window, m3_config, write_aiperf
 
 NAME = "m3trace_test"
 TRACE_NAME = "node_4242.1790857041234.pt.trace.json.gz"
@@ -244,6 +246,56 @@ def test_run_captures_both_windows_and_releases_the_gpus(stub):
     assert w["toks_per_fwd"] == pytest.approx(1 + 3 * 1800 / 3000)
     assert w["stop_profile_s"] == pytest.approx(0.6)
     assert w["window_offset_s"] == pytest.approx(650, abs=1)
+
+
+def test_xlsx_tab_from_the_analyzed_run(stub, tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    import m3_xlsx
+    run, _, out, _ = stub
+    r, _ = run()
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+    base = ["--run", str(out), "--stack", "11-04 stack: ATOM 1234abc, aiter 5678def, FlyDSL 0.4.1"]
+    assert m3_xlsx.main(base + ["--check"]) == 0
+    assert not list((out / "breakdown").glob("*.xlsx"))
+
+    master = tmp_path / "master.xlsx"
+    assert m3_xlsx.main(base + ["--master", str(master)]) == 0          # 不存在就新建
+    wb = openpyxl.load_workbook(master)
+    tab = wb.sheetnames[0]
+    assert re.fullmatch(r"MI455-M3-TP4-\d{4}", tab) and len(wb.sheetnames) == 1
+    wb.create_sheet("later")
+    wb.save(master)
+    assert m3_xlsx.main(base + ["--master", str(master)]) == 0          # 同名 tab 原位替换
+    assert openpyxl.load_workbook(master).sheetnames == [tab, "later"]
+
+    ws = openpyxl.load_workbook(out / "breakdown" / f"M3_TP4_layer_breakdown_{tab}.xlsx")[tab]
+    assert ws["A3"].value.startswith("MI455 MiniMax-M3 TP4 breakdown (11-04 stack, in-run AgentX c10 trace of ")
+    notes = ws["A4"].value
+    assert notes.startswith("MiniMax-M3-MXFP4 TP4 + EAGLE3 K3, rank 0\n") and "11-04 stack: ATOM 1234abc" in notes
+    heads = [(c.row, c.value) for c in ws["B"] if isinstance(c.value, str) and "  DENSE  kernel sum=" in c.value]
+    assert [h.split("  DENSE")[0] for _, h in heads] == [PREFILL_NAME.split(" sqsq")[0] + "]",
+                                                         "decode[bs=3 tok=12 d=3 spec=3]"]
+    for row, h in heads:
+        sparse = ws[f"J{row}"].value
+        assert " x1 = " in h and " x3 = " in sparse                  # 合成 config：1 个 dense 层、3 个 sparse 层
+        for col, sum_col, title in (("B", "D", h), ("J", "L", sparse)):
+            i = row + 2
+            times = []
+            while ws[f"{col}{i}"].value:
+                times.append(ws[f"{sum_col}{i}"].value)
+                i += 1
+            assert ws[f"{chr(ord(col) + 1)}{i}"].value == "layer_time"
+            assert ws[f"{sum_col}{i}"].value == f"=SUM({sum_col}{row + 2}:{sum_col}{i - 1})"
+            assert float(title.split("kernel sum=")[1].split("us")[0]) == pytest.approx(sum(times), abs=0.1)
+    qkv = next(c.row for c in ws["J"] if c.value == "attn_qkv_gemm")
+    assert ws[f"N{qkv}"].value == "2517x6144x2560" and ws[f"P{qkv}"].value.startswith("=")
+
+
+def test_xlsx_without_analysis_says_what_is_missing(tmp_path):
+    pytest.importorskip("openpyxl")
+    import m3_xlsx
+    with pytest.raises(SystemExit, match="run analyze.sh on"):
+        m3_xlsx.main(["--run", str(tmp_path), "--stack", "11-04 stack: ATOM 1234abc"])
 
 
 def test_busy_gpus_and_no_waiting_starts_nothing(stub):

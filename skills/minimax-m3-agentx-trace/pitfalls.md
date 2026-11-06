@@ -98,6 +98,10 @@ kernel 数都能对上，但哪个时长属于哪个 kernel 不可信。检查�
 prefill 差不多）；中位数 > 2 判为 SCRAMBLED，这时只能用窗口总量、step 的 union busy、每层的 union busy。
 M3 在这个栈上的 decode 是单 stream，验证时配对是完整的；换镜像后每次都要看这一行。
 
+另一种是错一位：profiler 丢掉一条 kernel 时间戳记录后，这个 step 里之后每个 kernel 名字配的是下一个 kernel 的
+时长。层的总和不变，同名 p90/p50 不一定超过 2。`m3_xlsx.py` 逐层和 L0-L8 的中位数比对（一个层实例里有 4 个以上
+kernel 偏离 1.8 倍以上就算错位），每个 step 从第一个错位的层起（连同它前一层）不用，用了多少写在备注里。
+
 ## 12. 先确认选的 forward 是完整的（原 29）
 
 窗口是运行中途开关的，边上的 forward 可能被截断，annotation 也可能比它的 kernel 先结束。先跑

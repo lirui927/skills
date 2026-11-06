@@ -1,6 +1,6 @@
 ---
 name: minimax-m3-agentx-trace
-description: 在 AgentX（aiperf inferencex-agentx-mvp）负载下给 MiniMax-M3-MXFP4（ATOM，TP4 + EAGLE3，MI455X / gfx1250）做运行中的 torch-profiler 采集，并把 trace 拆成逐 kernel、逐模块的 prefill / decode breakdown，再和 aiperf 的 ITL 对账。Use when asked to capture, profile or analyze a MiniMax-M3 ATOM trace (.pt.trace.json.gz), to attribute GPU time to attention core / indexer / MoE experts / all-reduce, to explain kernel time vs measured ITL, or to compare two M3 runs kernel by kernel. 采集占 4 张 GPU 约 40 分钟：先跑 check（不用 GPU），GPU 空闲且用户同意后才 run；其他模型或其他 TP 需要先移植切层规则。
+description: 在 AgentX（aiperf inferencex-agentx-mvp）负载下给 MiniMax-M3-MXFP4（ATOM，TP4 + EAGLE3，MI455X / gfx1250）做运行中的 torch-profiler 采集，并把 trace 拆成逐 kernel、逐模块的 prefill / decode breakdown（CSV，另可出逐层 Excel），再和 aiperf 的 ITL 对账。Use when asked to capture, profile or analyze a MiniMax-M3 ATOM trace (.pt.trace.json.gz), to attribute GPU time to attention core / indexer / MoE experts / all-reduce, to explain kernel time vs measured ITL, to build the per-layer breakdown Excel, or to compare two M3 runs kernel by kernel. 采集占 4 张 GPU 约 40 分钟：先跑 check（不用 GPU），GPU 空闲且用户同意后才 run；其他模型或其他 TP 需要先移植切层规则。
 ---
 
 # minimax-m3-agentx-trace
@@ -101,6 +101,32 @@ PY=python3 bash <skill-dir>/analyze.sh <OUT>          # 默认 rank 0 做 breakd
 
 最后打印 `breakdown/SUMMARY.txt`（每步的关键行）。不在采集机上分析时，把 trace 用普通重定向拷过来并核对
 md5（经过 shell 变量会丢 NUL 字节）。
+
+## 第 4 步（可选）：逐层 breakdown 的 Excel
+
+`analyze.sh` 跑完后，`m3_xlsx.py` 把同一个 `OUT` 做成一个 Excel tab（只用 CPU；解释器要装 openpyxl；只做 TP4）：
+
+```bash
+python3 <skill-dir>/m3_xlsx.py --run <OUT> --stack "11-04 stack: ATOM <rev>, aiter <rev>, FlyDSL <rev>" \
+  --master <汇总.xlsx>          # 先加 --check：只打印表格，不写文件
+```
+
+- `--stack` 必填：被采集镜像里的 ATOM / aiter / FlyDSL 版本（check 读到的 ATOM rev 在 `capture.log` 的
+  `atom_rev=`），标题取 ` stack` 前面的部分。`analyze.sh` 换过 rank A 或 `CFG` 时，同样传 `--rank` / `--config`。
+- 写出 `<OUT>/breakdown/M3_TP4_layer_breakdown_<tab>.xlsx`，tab 名默认 `<平台>-M3-TP4-<trace 的 MMDD>`（`--tab`
+  可改）。给了 `--master` 就把 tab 加进这个 workbook（同名 tab 原位替换，文件不存在就新建），几次采集放在一个文件里对比。
+- 每个 tab：上面 prefill（一个 forward），下面 decode（一个形状键的全部 step），各分左 dense（L0-2）、右 sparse
+  （L3-59）。每行一个 kernel：module、kernel、time-us（同类层实例的中位数）、ratio、MxKxN、dtype、TFLOP/s、TB/s
+  （后两列是公式）；每块下面是 layer_time（kernel 时长之和）、total_time、all_reduce_wait、layer_span（到下一层
+  开始）、gpu_idle、total_span，再下面是整步的 wall、busy、最大的 gap 和不开 profiler 的步长。A 列是备注（配置、
+  trace 怎么来的、数字怎么算、profiler 开销、GEMM 列的定义），转发时连备注一起。
+- 代表 prefill 和 decode 形状键默认和 `analyze.sh` 一致；要和另一个 tab 对齐 shape 时用 `--prefill` / `--decode`，
+  再用 `--match <tab>` 把对齐的对象写进备注。
+- decode 每个 step 从第一个名字和时长错一位的层起不用（`<skill-dir>/pitfalls.md` 第 11 条），用了多少层实例写在备注里。
+- 和 CSV 口径不同：Excel 只算主 stream，每个 kernel 取同类层实例的中位数，layer_time 是 kernel 时长之和；CSV 的
+  代表层是一个中位层，decode 每行只记关键路径上的部分（加起来是 union busy）。两边的数字不要混着引用。
+- MoE 的 TB/s 按均匀路由估算访问到的 expert，是上限；给了 `--peaks`（或 `M3_TRACE_PEAKS`）时，超过 `hbm_tbs` 会在
+  备注里写明。表里的 TFLOP/s、TB/s 不留空。
 
 ## 方法要点
 
