@@ -3,7 +3,8 @@
 
 窗口是在服务运行中途开关的，第一个和最后一个 forward 可能被截断；分析之前先确认每个 forward 都是完整的。
 对主 stream 上每个 prefill[...] / decode[...] annotation（只看 annotation 内的 GPU 事件，Memcpy HtoD 丢掉）：
-  - attention core 个数 = num_hidden_layers，其中稀疏层的 core（bs16 tile）个数 = config 里稀疏层数；
+  - attention core 个数 = num_hidden_layers，其中稀疏层的 core（bs16 tile；gfx950 还有 aiter pa_bf16_pertokenFp8）
+    个数 = config 里稀疏层数；
   - prefill（eager，kernel 顺序可信）：按 attention core 切层（m3_common.segment），逐层类型必须和 config 一致；
   - decode（HIP graph）：先比每步的名字计数（core / 稀疏 core / indexer / 通信 kernel / 总 kernel 数）
     和众数 step 是否一致；配对没乱（m3_decode.py 的 p90/p50 检查）时同样切层核对；
@@ -26,7 +27,8 @@ def count_all(allts, a):
 
 def decode_sig(w):
     return (sum(bool(mc.CORE.search(k["name"])) for k in w), sum(bool(mc.SPARSE_CORE.search(k["name"])) for k in w),
-            sum(bool(mc.INDEXER.search(k["name"])) for k in w), sum(bool(mc.COMM.search(k["name"])) for k in w))
+            sum(bool(mc.INDEXER.search(k["name"])) for k in w),
+            sum(bool(mc.COMM.search(k["name"]) or mc.AG_LL.search(k["name"])) for k in w))
 
 
 def main(argv=None):

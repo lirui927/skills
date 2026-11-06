@@ -30,12 +30,18 @@ GPU_CATS = ("kernel", "gpu_memcpy", "gpu_memset")
 # ---------------------------------------------------------------- kernel 类型（只认类型，不认角色）
 CORE = re.compile(r"fmha_bf16_pertoken|fmha_fwd|pa_decode_tile_kernel|paged_attention_decode|pa_bf16_pertokenFp8"
                   r"|^kernel_0$")
-SPARSE_CORE = re.compile(r"pa_decode_tile_kernel\w*_bs16_")
-INDEXER = re.compile(r"index_block_score|index_score|topk_index")
+# gfx950 的 aiter pa_bf16_pertokenFp8 只出现在稀疏层（prefill，以及 bs 大时的 decode）
+SPARSE_CORE = re.compile(r"pa_decode_tile_kernel\w*_bs16_|pa_bf16_pertokenFp8")
+INDEXER = re.compile(r"index_block_score|index_score|topk_index|^_(?:context_score|local_topk|merge_topk)")
 COMM = re.compile(r"ar_gfx1250|ar_ll_gfx1250|ar_rmsnorm|ag_gfx1250|start_sync_kernel|end_sync_kernel|ncclDevKernel"
-                  r"|ddaAllReduce|ddaAllGather|cross_device_reduce|allreduce|all_reduce|allgather|all_gather"
+                  r"|ddaAllReduce|ddaAllGather|cross_device_reduce|allreduce|all_reduce|allgather(?!_vec)|all_gather"
                   r"|reduce_scatter|quick_reduce|mscclKernel")
-EXPERT = re.compile(r"a8w4_tdm|fused_moe|fmoe|ck_moe|moe_gemm|mfma_moe|moe_stage|gemm1_a4w4|gemm2_a4w4")
+# 低延迟 all-gather 不进 COMM：indexer CP（ATOM_M3_INDEXER_CP=1）在每个稀疏层 core 之前用它
+# （gfx1250 ag_ll_gfx1250，gfx950 aiter::allgather_vec；logits 的 all-gather 是别的 kernel），
+# 算进 COMM 会让 segment() 在相邻两个 core 之间数出三组通信；按模块归到 comm_*。
+AG_LL = re.compile(r"ag_ll_gfx1250|allgather_vec")
+EXPERT = re.compile(r"a8w4_tdm|mxfp4_tdm_fp4\w*_e\d+_|fused_moe|fmoe|ck_moe|moe_gemm|mfma_moe|moe_stage"
+                    r"|gemm[12]_a(?:4|16)w4")
 SPLITK = re.compile(r"splitk_reduce|split_k_reduce")
 GEMM = re.compile(r"gemm|Cijk_|hipblaslt", re.I)
 COPY = re.compile(r"^Memcpy DtoD|__amd_rocclr_copyBuffer|fused_clone")
@@ -230,10 +236,14 @@ class M3Config:
 # ---------------------------------------------------------------- annotation 字段
 def ann_fields(name):
     """'prefill[bs=1 tok=2517 ctx=105301 nctx=261.9M sqsq=.. sqsk=.. sk=..]' -> {'bs': 1, 'tok': 2517, ...}。
-    ctx 有多条序列时是列表，这里不解析；sqsq = sum nq^2，sqsk = sum nq*nkv，sk = sum nkv（ATOM scheduler 定义）。"""
+    ctx 有多条序列时是列表，这里不解析；sqsq = sum nq^2，sqsk = sum nq*nkv，sk = sum nkv（ATOM scheduler 定义）。
+    forward 跑的行数多于调度的（token-graph 桶、decode graph 补齐）时 ATOM 写 tok=<调度>/<实际跑的>、
+    bs=<真实>/<graph>：tok / bs 取前一个数，后一个放进 tok_run / bs_run。"""
     out = {}
     for k, v in re.findall(r"\b(\w+)=([0-9.]+M?)(?=[\s\]])", name):
         out[k] = float(v[:-1]) * 1e6 if v.endswith("M") else float(v)
+    for k, v, run in re.findall(r"\b(bs|tok)=(\d+)/(\d+)(?=[\s\]])", name):
+        out[k], out[f"{k}_run"] = float(v), float(run)
     return out
 
 
@@ -333,10 +343,12 @@ def _pre_core(n, attn, st):
         return "attn_qk_norm_rope_cache"
     if "gather_cache" in n:
         return "attn_prefix_kv_gather"
-    if "index_block_score" in n or "index_score" in n:
+    if "index_block_score" in n or "index_score" in n or n.startswith("_context_score"):
         return "indexer_score"
-    if "topk_index" in n:
+    if "topk_index" in n or n.startswith(("_local_topk", "_merge_topk")):
         return "indexer_topk"
+    if AG_LL.search(n):
+        return "comm_ag_indexer_cp"
     if "pa_decode_plan" in n:
         return "sparse_attn_plan"
     if COPY.search(n):
@@ -376,13 +388,13 @@ def _ffn(n, ffn, st, hidden):
             return "moe_router" if st["ffn_gemm"] == 1 and st["expert"] == 0 else "gemm_unmapped"
         if any(s in n for s in ("topk_gating", "topk_softmax", "grouped_topk", "sigmoid_biased_topk")):
             return "moe_topk"
-        if any(s in n for s in ("moe_gather_reduce", "moe_sum", "moe_combine", "moe_finalize")):
+        if any(s in n for s in ("moe_gather_reduce", "moe_reduction", "moe_sum", "moe_combine", "moe_finalize")):
             return "moe_combine"
         if "scatter_preshuffle_scale" in n or "scale_shuffle" in n:
             return "moe_expert_scale_shuffle"
         if n.startswith("moe_") and "quant" in n:
             return "moe_expert_act_quant"
-        if n.startswith("moe_") or "moe_align" in n or "moe_sorting" in n:
+        if n.startswith("moe_") or "moe_align" in n or "moe_sort" in n:
             return "moe_route"
         if NORM.search(n) and st["ffn_gemm"] == 0:
             return "post_attn_norm"
@@ -476,7 +488,7 @@ def classify_tail(tail):
     rows, n_gemm = [], 0
     for i, k in enumerate(tail):
         n = k["name"]
-        if isc[i]:
+        if isc[i] or AG_LL.search(n):
             m = "comm_ag_logits"
         elif SPLITK.search(n):
             m = "@splitk"
@@ -558,7 +570,7 @@ def gemm_metrics(row, M, cfg, trace=None, peaks=None):
         return {}
     K, N, ad, wd = cfg.gemm_kn()[m]
     ad, wd = dtype_from_name(k["name"], (ad, wd))
-    src = f"derived: K,N from config at TP{cfg.tp}, M = annotation tok"
+    src = f"derived: K,N from config at TP{cfg.tp}, M = annotation tok (rows run, when padded)"
     rec = recorded_mkn(trace, k)
     if rec:
         note = "" if (rec[1], rec[2]) == (K, N) else f" (config gives K,N = {K},{N})"
@@ -630,7 +642,8 @@ def comm_metrics(row, M, cfg):
 
 
 def row_metrics(row, ann_name, cfg, trace=None, peaks=None):
-    M = ann_fields(ann_name).get("tok", 0)
+    f = ann_fields(ann_name)
+    M = f.get("tok_run", f.get("tok", 0))
     if row["role"] == "gemm":
         return gemm_metrics(row, M, cfg, trace, peaks)
     if row["role"] == "expert":

@@ -9,9 +9,11 @@ kernel 时间不是 ITL（照 trace-kernel-breakdown 的做法）：
   - toks/fwd 用 server log 里这个窗口自己的 MTP 统计（start_profile 和 stop_profile 之间的
     [MTP Stats Interval] 行，按 draft token 数加权），不用整次运行的平均；
   - 窗口在服务运行中途开关：位置相对 aiperf profiling 阶段开始多少秒（目标 600..900 s），
-    以及 stop_profile 导出期间引擎暂停，跨过这段的请求 ITL 会被拉高（aiperf 的数字是被扰动过的）。
-用法: m3_window.py <reduced 或原始 trace> [--server-log server.log] [--aiperf-dir DIR] [--toks-per-fwd X]
-                   [--out window_summary.json]
+    以及 stop_profile 导出期间引擎暂停，跨过这段的请求 ITL 会被拉高（aiperf 的数字是被扰动过的）；
+  - 固定 shape 重放（WORKLOAD=fixed）没有 aiperf：--fixed-summary 给出窗口前不开 profiler 时客户端量到的步长
+    和 prefill 耗时，和 trace 里的步长对比就是 profiler 的开销。
+用法: m3_window.py <reduced 或原始 trace> [--server-log server.log] [--aiperf-dir DIR] [--fixed-summary FILE]
+                   [--toks-per-fwd X] [--out window_summary.json]
 """
 import argparse
 import bisect
@@ -93,6 +95,7 @@ def main(argv=None):
     ap.add_argument("trace")
     ap.add_argument("--server-log", default=None)
     ap.add_argument("--aiperf-dir", default=None)
+    ap.add_argument("--fixed-summary", default=None, help="fixed_summary.json of a WORKLOAD=fixed capture (m3_fixed.py)")
     ap.add_argument("--trace-name", default=None,
                     help="original trace file name (as in the server log's 'trace exported to' line), when the trace "
                          "given is a reduced copy")
@@ -221,6 +224,27 @@ def main(argv=None):
                     S[f"aiperf_itl_{tag.split()[0]}_p50_ms"] = statistics.median(v)
         elif prof:
             print("   trace has no baseTimeNanoseconds: cannot place the window against aiperf records")
+    if args.fixed_summary:
+        F = json.load(open(args.fixed_summary))
+        p, ref, win = F.get("params", {}), F.get("reference") or {}, F.get("window") or {}
+        print(f"   fixed-shape replay: decode bs={p.get('bs')} x {p.get('ctx')} prompt tokens; prefill "
+              f"{p.get('prefill_cached')} cached + {p.get('prefill_new')} new; found in the server log: "
+              f"{F.get('prefill_shape_ok')}")
+        S["fixed"] = {"params": p, "prefill_shape_ok": F.get("prefill_shape_ok")}
+        for tag, st, what in (("ref", ref.get("step"), f"without profiler, {p.get('ref_s')} s before the window"),
+                              ("window", win.get("step"), "in the window, profiler on, prefill included")):
+            if st:
+                print(f"   client step {what}: median {st['median_ms']:.3f} ms  p10 {st['p10_ms']:.3f}  p90 "
+                      f"{st['p90_ms']:.3f}  ({st['n_gaps']} chunk gaps)")
+                S[f"fixed_{tag}_step_ms"] = st["median_ms"]
+        if ref.get("prefill_ms") is not None:
+            print(f"   prefill as the client sees it: {ref['prefill_ms']:.1f} ms without profiler, "
+                  f"{win.get('prefill_ms', float('nan')):.1f} ms in the window")
+            S["fixed_ref_prefill_ms"], S["fixed_window_prefill_ms"] = ref["prefill_ms"], win.get("prefill_ms")
+        if S.get("fixed_ref_step_ms") and S.get("step_period_ms"):
+            S["fixed_profiler_overhead"] = S["step_period_ms"] / S["fixed_ref_step_ms"] - 1
+            print(f"   profiler overhead on the decode step: {100 * S['fixed_profiler_overhead']:+.1f}% "
+                  f"(trace step period vs client step without profiler)")
     if args.out:
         json.dump(S, open(args.out, "w"), indent=1)
         print(f"   wrote {args.out}")

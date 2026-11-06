@@ -53,21 +53,34 @@ DRC=$?
 WIN_ARGS=(--trace-name "$(basename "$RAW_A")" --out "$B/window_summary.json")
 [ -f "$OUT/server.log" ] && WIN_ARGS+=(--server-log "$OUT/server.log")
 [ -d "$OUT/aiperf" ] && WIN_ARGS+=(--aiperf-dir "$OUT/aiperf")
+[ -f "$OUT/fixed_summary.json" ] && WIN_ARGS+=(--fixed-summary "$OUT/fixed_summary.json")
 $PY "$S/m3_window.py" "$RED_A" "${WIN_ARGS[@]}" > "$B/window.txt" 2>&1
 
 if [ -z "${TITLE:-}" ]; then
-  TITLE=$($PY - "$OUT/capture_meta.json" "$RA" <<'EOF'
-import json, sys
+  TITLE=$($PY - "$OUT/capture_meta.json" "$RA" "$OUT/capture.log" <<'EOF'
+import json, re, sys
 try:
     m = json.load(open(sys.argv[1]))
 except Exception:
     m = {}
 w = (m.get("windows") or {}).get("main") or {}
 lab = m.get("image_labels") or {}
-atom = (lab.get("com.amd.atom.commit") or "")[:9]
-print(f"MiniMax-M3-MXFP4 TP4 EAGLE3 AgentX C{m.get('conc', '?')}, rank {sys.argv[2]}, image {m.get('image', '?')}"
-      f"{' (ATOM ' + atom + ')' if atom else ''}, {w.get('window_s', 0):.0f} s window at {w.get('offset_s', 0):.0f} s"
-      f" into the aiperf profiling phase, ATOM_PROFILER_MORE=0")
+# 镜像标签可能是从基础镜像继承下来的旧值：优先用 check 在镜像里读到的 git rev
+try:
+    rev = re.findall(r"atom_rev=([0-9a-f]{7,})", open(sys.argv[3], errors="replace").read())
+except OSError:
+    rev = []
+atom = rev[-1][:9] if rev else (lab.get("com.amd.atom.commit") or "")[:9]
+img = f"image {m.get('image', '?')}{' (ATOM ' + atom + ')' if atom else ''}"
+if m.get("workload") == "fixed":
+    p = (m.get("fixed") or {}).get("params") or {}
+    print(f"MiniMax-M3-MXFP4 TP4 EAGLE3 fixed-shape decode bs={p.get('bs', '?')} x {p.get('ctx', '?')} tokens + one "
+          f"{p.get('prefill_cached', '?')}+{p.get('prefill_new', '?')} prefill, server config C{m.get('conc', '?')}, "
+          f"rank {sys.argv[2]}, {img}, {w.get('window_s', 0):.0f} s window, ATOM_PROFILER_MORE=0")
+else:
+    print(f"MiniMax-M3-MXFP4 TP4 EAGLE3 AgentX C{m.get('conc', '?')}, rank {sys.argv[2]}, {img}, "
+          f"{w.get('window_s', 0):.0f} s window at {w.get('offset_s') or 0:.0f} s into the aiperf profiling phase, "
+          f"ATOM_PROFILER_MORE=0")
 EOF
 )
 fi
@@ -98,7 +111,7 @@ fi
   echo "== completeness"; grep -E "^== |RESULT" "$B/completeness.txt"
   echo "== prefill (exit $PRC)"; grep -E "representative prefill|wall=|median layer|reconcile|median-layer model|unclassified|side streams|^ *sum " "$B/prefill_console.txt"
   echo "== decode (exit $DRC)"; grep -E "chosen key|segmented steps|same-name|representative layer|reconcile:" "$B/decode_console.txt"
-  echo "== window"; grep -E "== window|step period|window /|tokens per|predicted ITL|aiperf ITL|window starts|stop_profile took" "$B/window.txt"
+  echo "== window"; grep -E "== window|step period|window /|tokens per|predicted ITL|aiperf ITL|window starts|stop_profile took|fixed-shape|client step|client sees|profiler overhead" "$B/window.txt"
   [ -f "$B/rank_skew.txt" ] && { echo "== rank skew"; cat "$B/rank_skew.txt"; }
   [ -d "${BS:-/nonexistent}" ] && { echo "== shapes window"; grep -E "shapes recorded|K,N check" "$BS/prefill_console.txt" "$BS/decode_console.txt"; }
 } > "$B/SUMMARY.txt"

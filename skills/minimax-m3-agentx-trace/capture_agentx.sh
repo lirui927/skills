@@ -16,6 +16,10 @@
 #       WAIT_GPUS=1（GPU 被别人占着时每 POLL 秒查一次，等到空闲；0 = 直接退出）POLL=120
 #       KEEP=0（1 = 结束后保留容器）ANALYZE=1（采集完在宿主机上跑 analyze.sh，只用 CPU）
 #       MIN_FREE_GB=30（OUT 所在盘的最低空闲）TICK=5（等 aiperf / 窗口时的轮询间隔，秒）
+#       WORKLOAD=agentx|fixed  fixed = 不跑 aiperf，m3_fixed.py 把 decode 固定在 FIXED_BS（默认 CONC）个请求、每个
+#       FIXED_CTX（192038）token，窗口里插一个 FIXED_PREFILL_CACHED（157312）+ FIXED_PREFILL_NEW（2763）的 prefill；
+#       窗口前不开 profiler 量 FIXED_REF（5）秒做对照，窗口 = FIXED_PRE（2）秒 + prefill + FIXED_POST（3）秒。
+#       服务仍按 CONC 的 recipe 配置启动（max-num-seqs、indexer CP），START_OFFSET / WINDOW / DURATION 不用
 #       其余环境变量（ACCEPT_RATE、OFFLOAD、KV、GPU_MEM、EXTRA_ENV ...）原样传给 m3_server.sh
 # 从不终止别人的进程或容器；判断 GPU 是否空闲只读 /sys/class/kfd/kfd/proc（不打开 GPU）。
 # 判断是整机的：任何人的任何进程开着 KFD 都算占用。
@@ -48,6 +52,18 @@ PASS_ENV=(ACCEPT_RATE OFFLOAD KV GPU_MEM MAX_SEQS QR FLY ROCTRACER_SHIFT EXTRA_E
 for v in CONC START_OFFSET WINDOW DURATION SHAPES_OFFSET SHAPES_WINDOW SERVER_PORT ENGINE_PORT POLL PROFILER_TIMEOUT MIN_FREE_GB; do
   [[ "${!v}" =~ ^[0-9]+$ ]] || { echo "$v=${!v} is not a non-negative integer"; exit 2; }
 done
+WORKLOAD=${WORKLOAD:-agentx}
+FIXED_BS=${FIXED_BS:-$CONC}
+FIXED_CTX=${FIXED_CTX:-192038}
+FIXED_PREFILL_CACHED=${FIXED_PREFILL_CACHED:-157312}
+FIXED_PREFILL_NEW=${FIXED_PREFILL_NEW:-2763}
+FIXED_REF=${FIXED_REF:-5}
+FIXED_PRE=${FIXED_PRE:-2}
+FIXED_POST=${FIXED_POST:-3}
+case "$WORKLOAD" in agentx|fixed) ;; *) echo "WORKLOAD=$WORKLOAD: use agentx or fixed"; exit 2;; esac
+for v in FIXED_BS FIXED_CTX FIXED_PREFILL_CACHED FIXED_PREFILL_NEW FIXED_REF FIXED_PRE FIXED_POST; do
+  [[ "${!v}" =~ ^[0-9]+$ ]] || { echo "$v=${!v} is not a non-negative integer"; exit 2; }
+done
 
 log() { echo "$(date '+%F %T') $*" | { [ -n "$OUT" ] && [ -d "$OUT" ] && tee -a "$OUT/capture.log" || cat; }; }
 fail=0
@@ -72,7 +88,12 @@ gpu_holders() {  # 输出 "pid 容器名或命令"，不含我们自己的容器
 holders_summary() { gpu_holders | awk '{print $2}' | sort | uniq -c | awk '{printf "%s(%d procs) ", $2, $1}'; }
 
 preflight() {
-  log "preflight: mode=$MODE CONC=$CONC START_OFFSET=$START_OFFSET WINDOW=$WINDOW DURATION=$DURATION SHAPES=$SHAPES NAME=$NAME"
+  if [ "$WORKLOAD" = fixed ]; then
+    log "preflight: mode=$MODE WORKLOAD=fixed CONC=$CONC (server config) FIXED_BS=$FIXED_BS FIXED_CTX=$FIXED_CTX" \
+        "prefill $FIXED_PREFILL_CACHED+$FIXED_PREFILL_NEW, window ${FIXED_PRE}s+prefill+${FIXED_POST}s, reference ${FIXED_REF}s NAME=$NAME"
+  else
+    log "preflight: mode=$MODE CONC=$CONC START_OFFSET=$START_OFFSET WINDOW=$WINDOW DURATION=$DURATION SHAPES=$SHAPES NAME=$NAME"
+  fi
   command -v docker >/dev/null && docker info >/dev/null 2>&1 && ok "docker usable" || bad "docker not usable by $(id -un)"
   [ -n "$IMAGE" ] || bad "IMAGE not set (the serving image: ATOM + aiter + aiperf + the AgentX dataset cache)"
   if [ -n "$IMAGE" ]; then
@@ -94,8 +115,10 @@ preflight() {
       echo "$r" | sed 's/^/        /' | { [ -n "$OUT" ] && [ -d "$OUT" ] && tee -a "$OUT/capture.log" || cat; }
       echo "$r" | grep -q "atom_dir=MISSING" && bad "ATOM not found in the image"
       echo "$r" | grep -q "aiter=MISSING" && bad "aiter not importable in the image"
-      echo "$r" | grep -q "aiperf=MISSING" && bad "aiperf not in the image"
-      echo "$r" | grep -q "^dataset=" || bad "AgentX dataset cache (semianalysis_cc_traces_weka_062126) not found in the image's HF cache; aiperf would download it"
+      if [ "$WORKLOAD" = agentx ]; then
+        echo "$r" | grep -q "aiperf=MISSING" && bad "aiperf not in the image"
+        echo "$r" | grep -q "^dataset=" || bad "AgentX dataset cache (semianalysis_cc_traces_weka_062126) not found in the image's HF cache; aiperf would download it"
+      fi
       echo "$r" | grep -qE "detailed_annotation=MISSING|profiler_options=MISSING" && bad "this ATOM lacks ATOM_ENABLE_DETAILED_ANNOTATION / per-option profiler flags (annotations would carry no bs/tok/ctx)"
     else
       bad "image $IMAGE not present locally (docker pull it first)"
@@ -120,10 +143,21 @@ preflight() {
       [ -e "$OUT/traces" ] && [ "$MODE" = run ] && bad "$OUT/traces exists: use a fresh OUT per capture"
     fi
   fi
-  [ "$DURATION" -gt $((START_OFFSET + WINDOW + 60)) ] && ok "window at ${START_OFFSET}s+${WINDOW}s inside a ${DURATION}s profiling phase" \
-    || bad "DURATION=$DURATION must exceed START_OFFSET+WINDOW+60"
-  { [ "$START_OFFSET" -ge 600 ] && [ "$START_OFFSET" -le 900 ]; } || log "note  START_OFFSET=$START_OFFSET is outside 600..900 s (the method's steady-state range)"
-  { [ "$WINDOW" -ge 20 ] && [ "$WINDOW" -le 30 ]; } || log "note  WINDOW=$WINDOW is outside 20..30 s"
+  if [ "$WORKLOAD" = fixed ]; then
+    [ $((FIXED_CTX % 128)) != 0 ] && ok "FIXED_CTX=$FIXED_CTX leaves a $((FIXED_CTX % 128))-token tail to prefill when the $FIXED_BS requests start together" \
+      || bad "FIXED_CTX=$FIXED_CTX is a multiple of the 128-token block: the resend would have nothing to prefill"
+    [ $((FIXED_PREFILL_CACHED % 128)) = 0 ] && ok "FIXED_PREFILL_CACHED=$FIXED_PREFILL_CACHED is whole blocks" \
+      || bad "FIXED_PREFILL_CACHED=$FIXED_PREFILL_CACHED is not a multiple of 128: part of it would be recomputed"
+    [ "$FIXED_BS" -ge 1 ] && [ "$FIXED_BS" -le "${MAX_SEQS:-$((2 * CONC))}" ] && ok "FIXED_BS=$FIXED_BS within max-num-seqs ${MAX_SEQS:-$((2 * CONC))}" \
+      || bad "FIXED_BS=$FIXED_BS must be 1..max-num-seqs (${MAX_SEQS:-$((2 * CONC))})"
+    [ "$SHAPES" = 1 ] && bad "SHAPES=1 is for WORKLOAD=agentx only"
+    python3 -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$SKILL_DIR/m3_fixed.py" || bad "m3_fixed.py has a syntax error"
+  else
+    [ "$DURATION" -gt $((START_OFFSET + WINDOW + 60)) ] && ok "window at ${START_OFFSET}s+${WINDOW}s inside a ${DURATION}s profiling phase" \
+      || bad "DURATION=$DURATION must exceed START_OFFSET+WINDOW+60"
+    { [ "$START_OFFSET" -ge 600 ] && [ "$START_OFFSET" -le 900 ]; } || log "note  START_OFFSET=$START_OFFSET is outside 600..900 s (the method's steady-state range)"
+    { [ "$WINDOW" -ge 20 ] && [ "$WINDOW" -le 30 ]; } || log "note  WINDOW=$WINDOW is outside 20..30 s"
+  fi
   local p
   for p in "$SERVER_PORT" "$ENGINE_PORT"; do
     ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$p\$" && bad "port $p already in use on this host (set SERVER_PORT / ENGINE_PORT)" || ok "port $p free"
@@ -163,10 +197,10 @@ server_alive() { dexec "$NAME" pgrep -f '[a]tom.entrypoints.openai_server' >/dev
 stop_inside() {  # 只停我们自己容器里的服务和 aiperf；aiperf 先 SIGINT，给它时间导出已完成的记录
   dexec "$NAME" bash -c "pkill -INT -f '[a]iperf profile'
     for i in \$(seq 1 60); do pgrep -f '[a]iperf profile' >/dev/null || break; sleep 1; done
-    pkill -f '[a]iperf profile'; pkill -f '[a]tom.entrypoints.openai_server'" 2>/dev/null
+    pkill -f '[a]iperf profile'; pkill -f '[m]3_fixed.py'; pkill -f '[a]tom.entrypoints.openai_server'" 2>/dev/null
   local i n
   for i in $(seq 1 60); do
-    n=$(dexec "$NAME" bash -c "ps -eo args | grep -cE '[o]penai_server|[a]iperf profile|ATOM::'" 2>/dev/null)
+    n=$(dexec "$NAME" bash -c "ps -eo args | grep -cE '[o]penai_server|[a]iperf profile|[A]TOM::'" 2>/dev/null)
     [ "${n:-0}" = 0 ] && break
     sleep "$TICK"
   done
@@ -260,6 +294,34 @@ EOF
   log "$tag: aiperf rc=$? ; $(grep -m1 -E 'Benchmark Duration' "$host_log")"
 }
 
+fixed_window() {  # WORKLOAD=fixed：m3_fixed.py 在容器里预热、起 FIXED_BS 路 decode、量对照、开窗插 prefill、关窗
+  local host_log="$OUT/fixed_client.log" rc
+  log "main: fixed-shape client started (bs=$FIXED_BS x $FIXED_CTX tokens), log $host_log"
+  # 上限只防挂死：预热是 FIXED_BS 个长 prompt 的整段 prefill
+  timeout $((FIXED_BS * 300 + PROFILER_TIMEOUT + 1800)) docker exec "$NAME" python3 -u /skill/m3_fixed.py \
+    --url "http://localhost:$SERVER_PORT" --model /models/MiniMax-M3-MXFP4 --bs "$FIXED_BS" --ctx "$FIXED_CTX" \
+    --prefill-cached "$FIXED_PREFILL_CACHED" --prefill-new "$FIXED_PREFILL_NEW" \
+    --ref-s "$FIXED_REF" --pre-s "$FIXED_PRE" --post-s "$FIXED_POST" \
+    --server-log /out/server.log --summary /out/fixed_summary.json > "$host_log" 2>&1
+  rc=$?
+  log "main: fixed-shape client rc=$rc: $(grep -E 'reference|window \(|prefill shape|ABORT' "$host_log" | cut -c21- | tr '\n' ' ')"
+  { [ $rc = 0 ] && [ -f "$OUT/fixed_summary.json" ]; } || { log "ABORT main: fixed-shape client failed"; return 1; }
+  python3 - "$OUT/capture_meta.json" "$OUT/fixed_summary.json" <<'EOF'
+import json, sys
+p, fs = sys.argv[1:]
+m, s = json.load(open(p)), json.load(open(fs))
+w = s["window"]
+m.setdefault("windows", {})["main"] = {k: w[k] for k in ("start_profile_sent", "start_profile_returned",
+                                                         "stop_profile_sent", "stop_profile_returned")}
+m["windows"]["main"]["window_s"] = w["stop_profile_sent"] - w["start_profile_returned"]
+m["fixed"] = {"params": s["params"], "prefill_shape_ok": s["prefill_shape_ok"], "stream_errors": len(s["stream_errors"])}
+json.dump(m, open(p, "w"), indent=1)
+EOF
+  python3 -c "import json, sys; ok = json.load(open(sys.argv[1]))['prefill_shape_ok']; sys.exit(0 if all(ok.values()) else 1)" \
+    "$OUT/fixed_summary.json" || log "WARN main: the prefill shape was not found in the server log; check fixed_summary.json 'scheduled'"
+  log "main: window recorded"
+}
+
 # ------------------------------------------------------------------ main
 preflight
 if [ "$MODE" = check ]; then
@@ -281,12 +343,19 @@ import json, subprocess, sys
 lab = json.loads(subprocess.run(["docker", "image", "inspect", "-f", "{{json .Config.Labels}}", "$IMAGE"],
                                 capture_output=True, text=True).stdout or "null") or {}
 iid = subprocess.run(["docker", "image", "inspect", "-f", "{{.Id}}", "$IMAGE"], capture_output=True, text=True).stdout.strip()
-json.dump({"image": "$IMAGE", "image_id": iid, "image_labels": lab, "conc": $CONC, "tp": 4,
-           "method": "in-run AgentX window, ATOM_PROFILER_MORE=0", "windows": {}}, open(sys.argv[1], "w"), indent=1)
+method = {"agentx": "in-run AgentX window, ATOM_PROFILER_MORE=0",
+          "fixed": "fixed-shape replay (bs=$FIXED_BS x $FIXED_CTX tokens decode, one $FIXED_PREFILL_CACHED+$FIXED_PREFILL_NEW "
+                   "prefill in the window), ATOM_PROFILER_MORE=0"}["$WORKLOAD"]
+json.dump({"image": "$IMAGE", "image_id": iid, "image_labels": lab, "conc": $CONC, "tp": 4, "workload": "$WORKLOAD",
+           "method": method, "windows": {}}, open(sys.argv[1], "w"), indent=1)
 EOF
 wait_free   # 建容器期间别人可能刚开始用卡
 start_server 0 /out/traces /out/server.log || exit 1
-window /out/aiperf "$DURATION" "$START_OFFSET" "$WINDOW" main || exit 1
+if [ "$WORKLOAD" = fixed ]; then
+  fixed_window || exit 1
+else
+  window /out/aiperf "$DURATION" "$START_OFFSET" "$WINDOW" main || exit 1
+fi
 if [ "$SHAPES" = 1 ]; then
   stop_inside
   wait_free

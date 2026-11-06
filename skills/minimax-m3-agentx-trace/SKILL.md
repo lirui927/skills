@@ -63,6 +63,24 @@ START_OFFSET+WINDOW+60）、`SHAPES`（0）、`ACCEPT_RATE`（0.5933，固定 EA
 `stop_profile` 期间引擎暂停导出（大窗口要几十秒），跨过这段的请求 ITL 会被拉高：**这次运行的 aiperf 数字是被
 扰动过的，不能当性能结果引用**，只用来和窗口对账（`<skill-dir>/pitfalls.md` 第 16 条）。
 
+### 要确定的 decode batch：`WORKLOAD=fixed`
+
+AgentX 回放里 decode 的 batch 随时间起伏，不等于 `CONC`（任一时刻只有一部分请求在 decode，c32 的窗口里 bs 在
+5–14 之间）。要每步都是同一个 bs 时用固定 shape 重放：服务仍按 `CONC` 的 recipe 配置起（max-num-seqs、indexer
+CP），不跑 aiperf；`m3_fixed.py` 在容器里把 `FIXED_BS`（默认 `CONC`）个各 `FIXED_CTX`（192038）token 的随机
+token-id prompt 逐个 prefill 进 prefix cache，再一起发出（`ignore_eos`），之后每步 decode 都是 bs=`FIXED_BS`。
+先不开 profiler 量 `FIXED_REF`（5）秒的客户端步长和一次 prefill 做对照，再开窗口：`FIXED_PRE`（2）秒 decode ->
+一个 `FIXED_PREFILL_CACHED`（157312，整 block）+ `FIXED_PREFILL_NEW`（2763）的 prefill -> `FIXED_POST`（3）秒
+decode。prefill 的默认值取自一次 c32 AgentX 窗口的代表 prefill。
+
+```bash
+IMAGE=... MODEL_DIR=... OUT=... CONC=32 WORKLOAD=fixed FIXED_BS=32 bash <skill-dir>/capture_agentx.sh run
+```
+
+多出的产物：`fixed_client.log`、`fixed_summary.json`（各时刻、对照和窗口里的客户端步长、两次 prefill 的耗时、
+server log 里 prefill shape 的核对）；`window.txt` 用对照步长给出 profiler 的开销。这不是 AgentX 负载，报告里写明
+fixed-shape replay（`wide.csv` 第一行已带上）。
+
 ## 第 3 步：分析（只用 CPU）
 
 ```bash
@@ -120,6 +138,8 @@ md5（经过 shell 变量会丢 NUL 字节）。
 - [ ] side stream 的总量和未被覆盖的部分已列出。
 - [ ] 推导出的 TFLOP/s、TB/s 已用 `--peaks`（或 `PEAKS=`）做过上限检查；超过峰值的行留空并说明。
 - [ ] 窗口位置在 profiling 阶段 600–900 s；step 周期 / toks_per_fwd 和 aiperf ITL 的差距有解释。
+      `WORKLOAD=fixed`：`fixed_summary.json` 里 `prefill_shape_ok` 两项都是 true、`stream_errors` 为空、
+      `window.streams_alive` 等于 FIXED_BS（少了说明服务没按 ignore_eos 跑满），decode 只有一个形状键。
 
 ## 报告怎么写
 
